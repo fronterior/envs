@@ -1,0 +1,281 @@
+#!/bin/sh
+# envs - local env router
+# Usage: envs <env_name> <command...>
+# Reads ~/.config/envs/config (or $ENVS_CONFIG_DIR/config), matches
+# routing rules against context (repo/org/branch/current_dir),
+# exports the matched env file, and execs the child command.
+
+set -u
+
+# ----- color guard -----
+_color_enabled=0
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != "dumb" ]; then
+  _color_enabled=1
+fi
+
+_c() {
+  # _c <ansi-code> <text>
+  if [ "$_color_enabled" -eq 1 ]; then
+    printf '\033[%sm%s\033[0m' "$1" "$2"
+  else
+    printf '%s' "$2"
+  fi
+}
+
+# ----- pretty output helpers -----
+_prefix() { _c '1;7;36' ' envs '; printf ' '; }
+
+_emit_match() {
+  # _emit_match <env> <path> <rule_line>
+  {
+    _prefix
+    _c 32 '✓ '
+    _c '1' "$1"
+    printf ' '
+    _c 36 "→ $2"
+    printf '\n'
+    _c 2 '↳ '
+    _c 2 "$3"
+    printf '\n'
+  } >&2
+}
+
+_emit_nomatch() {
+  # _emit_nomatch <env> <repo> <branch> <current_dir> <org> <config_path>
+  {
+    _prefix
+    _c 33 '✗ '
+    printf 'no rule for '
+    _c '1' "$1"
+    printf '\n'
+    _c 2 "↳ repo=$2 branch=$3 current_dir=$4 org=$5"
+    printf '\n'
+    _c 2 "↳ config: $6"
+    printf '\n'
+  } >&2
+}
+
+_emit_error() {
+  # _emit_error <message>
+  {
+    _prefix
+    _c 31 '! '
+    printf '%s\n' "$1"
+  } >&2
+}
+
+_usage() {
+  echo "usage: envs <env_name> <command...>" >&2
+  exit 2
+}
+
+# ----- arg parsing -----
+if [ "$#" -lt 1 ]; then _usage; fi
+_env="$1"
+shift
+if [ "$#" -lt 1 ]; then _usage; fi
+
+# ----- context collection -----
+_origin_url=$(git config --get remote.origin.url 2>/dev/null || true)
+
+_ctx_repo=""
+_ctx_org=""
+if [ -n "$_origin_url" ]; then
+  # strip trailing .git
+  _stripped=$(printf '%s' "$_origin_url" | sed -e 's/\.git$//')
+  # repo = basename
+  _ctx_repo=$(basename "$_stripped")
+  # org = second-to-last segment after splitting on : and /
+  _ctx_org=$(printf '%s' "$_stripped" | awk -F'[:/]' '{ if (NF>=2) print $(NF-1); else print "" }')
+fi
+
+_ctx_branch=$(git symbolic-ref --short HEAD 2>/dev/null || true)
+_ctx_current_dir=$(basename "$PWD")
+
+# ----- config path -----
+_config_dir="${ENVS_CONFIG_DIR:-$HOME/.config/envs}"
+_config_file="$_config_dir/config"
+
+if [ ! -r "$_config_file" ]; then
+  _emit_error "config not found at $_config_file (running without env injection)"
+  exec "$@"
+fi
+
+# ----- context value lookup -----
+_ctx_value() {
+  case "$1" in
+    repo) printf '%s' "$_ctx_repo" ;;
+    org) printf '%s' "$_ctx_org" ;;
+    branch) printf '%s' "$_ctx_branch" ;;
+    current_dir) printf '%s' "$_ctx_current_dir" ;;
+    *) printf '__ENVS_UNKNOWN_KEY__' ;;
+  esac
+}
+
+# ----- path variable interpolation -----
+# Replace <keyword> placeholders in a path with context values.
+# Returns 0 with interpolated path on stdout, or 1 if any required variable is empty
+# or any unknown keyword appears.
+_interpolate_path() {
+  _ip="$1"
+  # Each substitution: bail if value empty, otherwise replace globally with '|' delimiter
+  # (delimiter must not collide with '/' which is common in paths).
+  for _key in repo org branch current_dir; do
+    _placeholder="<$_key>"
+    case "$_ip" in
+      *"$_placeholder"*)
+        _val=$(_ctx_value "$_key")
+        if [ -z "$_val" ]; then
+          return 1
+        fi
+        _ip=$(printf '%s' "$_ip" | sed "s|$_placeholder|$_val|g")
+        ;;
+    esac
+  done
+  # Any remaining <...> (without colon) is an unknown keyword.
+  case "$_ip" in
+    *'<'*'>'*)
+      # Only treat as unknown if it's plain <keyword> form (no colon between < and >)
+      _remainder=$(printf '%s' "$_ip" | sed -n 's/.*\(<[^<>]*>\).*/\1/p')
+      case "$_remainder" in
+        *:*) ;;  # Has colon — not interpolation form, ignore
+        *)
+          echo "envs: warning: unknown variable in path: $_remainder" >&2
+          return 1
+          ;;
+      esac
+      ;;
+  esac
+  printf '%s' "$_ip"
+}
+
+# ----- path resolver -----
+_resolve_path() {
+  _p="$1"
+  case "$_p" in
+    /*) printf '%s' "$_p" ;;
+    '~/'*) printf '%s' "$HOME/${_p#~/}" ;;
+    *) printf '%s' "$_config_dir/${_p#./}" ;;
+  esac
+}
+
+# ----- line parser + matcher -----
+_matched_line=""
+_matched_env=""
+_matched_path=""
+
+while IFS= read -r _line || [ -n "$_line" ]; do
+  # trim leading whitespace
+  _trimmed=$(printf '%s' "$_line" | sed -e 's/^[[:space:]]*//')
+  case "$_trimmed" in
+    ''|'#'*) continue ;;
+  esac
+
+  _conds=""
+  _rest=""
+  case "$_trimmed" in
+    '<'*'>'*)
+      # extract <...> conditions and the rest
+      _conds=$(printf '%s' "$_trimmed" | sed -e 's/^<//' -e 's/>.*$//')
+      _rest=$(printf '%s' "$_trimmed" | sed -e 's/^<[^>]*>//')
+      ;;
+    *)
+      _conds=""
+      _rest="$_trimmed"
+      ;;
+  esac
+
+  # rest = env_name:path
+  case "$_rest" in
+    *:*) ;;
+    *)
+      _emit_error "skipping malformed line: $_trimmed"
+      continue
+      ;;
+  esac
+  _line_env="${_rest%%:*}"
+  _line_path="${_rest#*:}"
+
+  # env_name must match
+  if [ "$_line_env" != "$_env" ]; then
+    continue
+  fi
+
+  # evaluate conditions (comma = AND)
+  # NOTE: we must NOT use `set --` to split $_conds because that would
+  # clobber the original positional parameters (the user's command).
+  _cond_ok=1
+  _bad_key=0
+  if [ -n "$_conds" ]; then
+    _rest_conds="$_conds"
+    while [ -n "$_rest_conds" ]; do
+      case "$_rest_conds" in
+        *,*)
+          _cond="${_rest_conds%%,*}"
+          _rest_conds="${_rest_conds#*,}"
+          ;;
+        *)
+          _cond="$_rest_conds"
+          _rest_conds=""
+          ;;
+      esac
+      _ck="${_cond%%:*}"
+      _cv="${_cond#*:}"
+      # trim spaces around key/value
+      _ck=$(printf '%s' "$_ck" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      _cv=$(printf '%s' "$_cv" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+      _actual=$(_ctx_value "$_ck")
+      if [ "$_actual" = "__ENVS_UNKNOWN_KEY__" ]; then
+        _emit_error "skipping unknown keyword '$_ck' in: $_trimmed"
+        _bad_key=1
+        break
+      fi
+      # empty context value never matches
+      if [ -z "$_actual" ] || [ "$_actual" != "$_cv" ]; then
+        _cond_ok=0
+        break
+      fi
+    done
+  fi
+
+  if [ "$_bad_key" -eq 1 ]; then
+    continue
+  fi
+  if [ "$_cond_ok" -ne 1 ]; then
+    continue
+  fi
+
+  # Interpolate <keyword> placeholders inside the path. If interpolation fails
+  # (empty context value or unknown keyword), skip this line — fail-open to next.
+  _interpolated=$(_interpolate_path "$_line_path") || continue
+
+  _matched_line="$_trimmed"
+  _matched_env="$_line_env"
+  _matched_path=$(_resolve_path "$_interpolated")
+  break
+done < "$_config_file"
+
+# ----- no match: fail-open -----
+if [ -z "$_matched_path" ]; then
+  _emit_nomatch "$_env" "$_ctx_repo" "$_ctx_branch" "$_ctx_current_dir" "$_ctx_org" "$_config_file"
+  exec "$@"
+fi
+
+# ----- env file readable check -----
+if [ ! -r "$_matched_path" ]; then
+  _emit_error "env file not readable: $_matched_path"
+  exec "$@"
+fi
+
+_emit_match "$_matched_env" "$_matched_path" "$_matched_line"
+
+# ----- export + exec in subshell -----
+(
+  while IFS= read -r _kv || [ -n "$_kv" ]; do
+    case "$_kv" in
+      ''|'#'*) continue ;;
+      *=*) export "${_kv%%=*}=${_kv#*=}" ;;
+    esac
+  done < "$_matched_path"
+  exec "$@"
+)
