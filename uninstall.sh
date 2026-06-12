@@ -1,6 +1,6 @@
 #!/bin/sh
 # uninstall.sh — envs uninstaller
-# Removes ~/.local/bin/envs symlink/file. Preserves your ~/.config/envs/* (secrets).
+# Removes ~/.local/bin/envs symlink/file and the clone at $ENVS_HOME. Preserves your ~/.config/envs/* (secrets).
 # Works both locally (./uninstall.sh) and via curl one-liner.
 #
 # Env overrides:
@@ -45,10 +45,10 @@ _remove_link() {
 
 _remove_link "$_target"
 
-# Clone dir notice (don't auto-delete — might contain user's local edits)
-if [ -d "$_envs_home/.git" ]; then
-  echo
-  echo "NOTE: clone at $_envs_home is preserved. To remove: rm -rf \"$_envs_home\""
+# Remove the clone at $_envs_home (if it exists)
+if [ -n "$_envs_home" ] && [ -d "$_envs_home/.git" ]; then
+  rm -rf "$_envs_home"
+  echo "removed clone: $_envs_home"
 fi
 
 # Config preservation notice

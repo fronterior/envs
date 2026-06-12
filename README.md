@@ -32,6 +32,8 @@ curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/install.sh | s
 curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/uninstall.sh | sh
 ```
 
+Removes `~/.local/bin/envs` and the clone at `~/.local/share/envs`. Your routing config at `~/.config/envs/` is **preserved** — `rm -rf ~/.config/envs` to delete it.
+
 ## Quick start
 
 ```sh
