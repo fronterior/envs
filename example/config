@@ -3,37 +3,40 @@
 # Pairs (repo + current_dir) match in git worktrees and fall back to plain directories.
 # Path can contain <repo>, <org>, <branch>, <current_dir> placeholders (no colon).
 # An empty variable skips the line (fail-open to the next rule).
+#
+# All rules below are commented out by default. Uncomment (remove leading '#')
+# the lines you want to enable.
 
 # === myapp — static path (no interpolation) ===
 # usage: envs development pnpm dev
-<repo:myapp>development:./myapp/.env.development
-<current_dir:myapp>development:./myapp/.env.development
+#<repo:myapp>development:./myapp/.env.development
+#<current_dir:myapp>development:./myapp/.env.development
 
 # usage: envs production pnpm build
-<repo:myapp>production:./myapp/.env.production
-<current_dir:myapp>production:./myapp/.env.production
+#<repo:myapp>production:./myapp/.env.production
+#<current_dir:myapp>production:./myapp/.env.production
 
 # usage: envs test pnpm vitest
-<repo:myapp>test:./myapp/.env.test
-<current_dir:myapp>test:./myapp/.env.test
+#<repo:myapp>test:./myapp/.env.test
+#<current_dir:myapp>test:./myapp/.env.test
 
 # === interpolated path ===
 # Same target as above but path uses <repo> instead of hardcoded name.
 # usage: envs development pnpm dev
-<repo:myapp>development:./<repo>/.env.development
+#<repo:myapp>development:./<repo>/.env.development
 
 # === pure interpolation (no condition) ===
 # Matches any git repo with a remote. <repo> resolves at call time.
 # Line is skipped when not in a git repo (empty <repo>).
 # usage: envs development pnpm dev
-development:./<repo>/.env.development
+#development:./<repo>/.env.development
 
 # === branch-aware with interpolation ===
 # main → production, otherwise no rule.
 # usage: envs production pnpm build  (on main)
-<repo:myapp,branch:main>production:./<repo>/.env.production
+#<repo:myapp,branch:main>production:./<repo>/.env.production
 
 # === full path interpolation ===
 # Useful when you organize env files under <repo>/<branch>/.env.<env>
 # usage: envs test pnpm vitest
-test:./<repo>/<branch>/.env.test
+#test:./<repo>/<branch>/.env.test
