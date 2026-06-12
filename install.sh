@@ -76,8 +76,53 @@ else
 fi
 
 case ":$PATH:" in
-  *":$_target_dir:"*) echo "PATH OK: $_target_dir is in PATH" ;;
-  *) echo "WARN: add this to your shell rc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
+  *":$_target_dir:"*)
+    echo "PATH OK: $_target_dir is in PATH"
+    ;;
+  *)
+    # PATH not set — detect shell, prompt to add
+    _shell=$(basename "${SHELL:-}")
+    _rc=""
+    case "$_shell" in
+      zsh) _rc="$HOME/.zshrc" ;;
+      bash)
+        if [ -f "$HOME/.bashrc" ]; then
+          _rc="$HOME/.bashrc"
+        elif [ -f "$HOME/.bash_profile" ]; then
+          _rc="$HOME/.bash_profile"
+        fi
+        ;;
+      sh|dash|ash) _rc="$HOME/.profile" ;;
+    esac
+
+    _path_line='export PATH="$HOME/.local/bin:$PATH"'
+
+    if [ -z "$_rc" ] || [ ! -e /dev/tty ]; then
+      # Can't detect shell or no tty — print manual instruction
+      echo "WARN: $_target_dir is not in PATH"
+      echo "  Add this to your shell rc: $_path_line"
+    elif grep -qF "$_target_dir" "$_rc" 2>/dev/null; then
+      # Line already in rc — just remind to source
+      echo "PATH line for $_target_dir already in $_rc"
+      echo "  Run: source $_rc  (or open a new shell)"
+    else
+      # Prompt user via /dev/tty
+      printf "envs: %s is not in PATH. Add to %s? [y/N] " "$_target_dir" "$_rc"
+      _yn=""
+      read -r _yn < /dev/tty || _yn=""
+      case "$_yn" in
+        y|Y|yes|YES)
+          printf '\n# Added by envs install.sh\n%s\n' "$_path_line" >> "$_rc"
+          echo "added PATH line to $_rc"
+          echo "  Run: source $_rc  (or open a new shell)"
+          ;;
+        *)
+          echo "skipped — add this manually to $_rc:"
+          echo "  $_path_line"
+          ;;
+      esac
+    fi
+    ;;
 esac
 
 echo

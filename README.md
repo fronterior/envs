@@ -26,6 +26,8 @@ Modern dev loops involve multiple worktrees of the same repo (for parallel featu
 curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/install.sh | sh
 ```
 
+If `~/.local/bin` is not in your `PATH`, the installer will detect your shell and offer to add the export line to `~/.zshrc` / `~/.bashrc` / `~/.profile` (asks for confirmation).
+
 ## Uninstall
 
 ```sh
