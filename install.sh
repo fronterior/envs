@@ -61,6 +61,20 @@ _install_link() {
 
 _install_link envs
 
+# Seed ~/.config/envs/config from example if not present (existing config is preserved).
+_config_dir="$HOME/.config/envs"
+_config_file="$_config_dir/config"
+_example_config="$_proj_dir/example/config"
+if [ -e "$_config_file" ]; then
+  echo "config already present at $_config_file - keeping it"
+elif [ -f "$_example_config" ]; then
+  mkdir -p "$_config_dir"
+  cp "$_example_config" "$_config_file"
+  echo "seeded config from example: $_config_file"
+else
+  echo "WARN: example/config not found at $_example_config - skipping config seed"
+fi
+
 case ":$PATH:" in
   *":$_target_dir:"*) echo "PATH OK: $_target_dir is in PATH" ;;
   *) echo "WARN: add this to your shell rc: export PATH=\"\$HOME/.local/bin:\$PATH\"" ;;
