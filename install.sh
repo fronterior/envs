@@ -101,7 +101,7 @@ case ":$PATH:" in
       # Can't detect shell or no tty — print manual instruction
       echo "WARN: $_target_dir is not in PATH"
       echo "  Add this to your shell rc: $_path_line"
-    elif grep -qF "$_target_dir" "$_rc" 2>/dev/null; then
+    elif grep -qF '.local/bin' "$_rc" 2>/dev/null; then
       # Line already in rc — just remind to source
       echo "PATH line for $_target_dir already in $_rc"
       echo "  Run: source $_rc  (or open a new shell)"
