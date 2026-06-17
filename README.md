@@ -99,7 +99,8 @@ Examples:
 # Inside the myapp repo, "envs development ..." -> ./myapp/.env.development
 <repo:myapp>development:./myapp/.env.development
 
-# Even outside git, if the current dir is named myapp, same rule.
+# Even outside git, if the cwd path contains "myapp", same rule.
+# Use `*/myapp` instead to pin to "myapp as the last segment".
 <current_dir:myapp>development:./myapp/.env.development
 
 # Branch-aware: on main, development maps to the production file.
@@ -124,10 +125,24 @@ The same keyword pool is used both as conditions (`<keyword:value>` at the start
 | `repo`        | `basename` of `git config --get remote.origin.url`, `.git` stripped |
 | `org`         | The org/user segment of that URL (e.g. `ridi` in `git@github.com:ridi/myapp.git`) |
 | `branch`      | `git symbolic-ref --short HEAD`                            |
-| `current_dir` | `basename "$PWD"`                                          |
+| `current_dir` | As a **condition** (`<current_dir:...>`): matched against the **absolute cwd path** with three glob forms (see below). As **path interpolation** (`<current_dir>`): `basename "$PWD"` — unchanged. |
 | `name`        | The env_name (the CLI first argument). Path-interpolation only — not usable as a condition. |
 
 If you're not in a git repo, `repo`/`org`/`branch` are empty, so any rule using them never matches. `current_dir` always works — use it as your worktree-less fallback. `<name>` always resolves (it's the CLI arg) — useful for collapsing per-env duplicates into one rule, e.g. `<repo:myapp>development:./<repo>/.env.<name>` and `<repo:myapp>production:./<repo>/.env.<name>`. Unknown keywords (typos like `<rpeo:foo>`) are skipped with a stderr warning.
+
+### `current_dir` glob matching
+
+`<current_dir:VALUE>` matches against the absolute cwd path string. Three patterns are supported:
+
+| Pattern        | Meaning                                                                                  |
+|----------------|------------------------------------------------------------------------------------------|
+| `foo`          | cwd path **contains** `foo` as a substring (loose; matches anywhere in the path).        |
+| `*/foo`        | cwd path **ends with** `/foo` — i.e. `foo` is the last segment (exact).                  |
+| `*/foo/*`      | cwd path **contains** `/foo/` — i.e. `foo` is a segment somewhere with more path after.  |
+
+The wildcard `*` here is shell-glob-like and may cross slashes; only the three positions above are defined. Any other use of `*` (e.g. `*foo*bar*`) is treated as a literal substring search for the whole pattern.
+
+Compatibility: prior to this change `current_dir` was an exact match against `basename(cwd)`. The new behaviour is intentionally looser by default — bare `foo` now also matches `myfoo`, `foobar`, `foo-extra` etc. anywhere in the path. If you need the old "last segment is exactly foo" semantics, write `<current_dir:*/foo>`.
 
 An **empty `env_name`** (e.g. `<repo:myapp>:./<repo>/.env.shared`, or just `:./.env.global`) is reserved for `envs-source-activate` without a name argument — see the [envs-source](#envs-source-virtualenv-style) section.
 
