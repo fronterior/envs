@@ -1,3 +1,6 @@
 *.bak.*
 .env
 .env.*
+.zig-cache/
+zig-cache/
+zig-out/
