@@ -11,6 +11,8 @@ pub fn build(b: *std.Build) void {
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
+        // main.zig calls execvp/setenv via `extern "c"`; required for cross-compile.
+        .link_libc = true,
     });
 
     const exe = b.addExecutable(.{

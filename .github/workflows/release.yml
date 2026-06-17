@@ -1,0 +1,116 @@
+name: release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to publish (e.g. v0.0.1). Must already exist.'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    # Zig cross-compiles every target from a single Linux host, so we keep the
+    # matrix on ubuntu-latest. This keeps CI cheap and asset naming uniform.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - aarch64-macos
+          - x86_64-macos
+          - aarch64-linux
+          - x86_64-linux
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build (${{ matrix.target }}, ReleaseFast)
+        run: |
+          zig build \
+            -Dtarget=${{ matrix.target }} \
+            --release=fast
+
+      - name: Stage tarball contents
+        run: |
+          set -eu
+          stage="dist/envs-${{ matrix.target }}"
+          mkdir -p "$stage" "$stage/example"
+          cp zig-out/bin/envs                "$stage/envs"
+          chmod 0755                          "$stage/envs"
+          cp install.sh                       "$stage/install.sh"
+          chmod 0755                          "$stage/install.sh"
+          cp envs-source.sh                   "$stage/envs-source.sh"
+          cp envs-source.fish                 "$stage/envs-source.fish"
+          cp envs-dev-source.sh               "$stage/envs-dev-source.sh"
+          cp README.md                        "$stage/README.md"
+          cp example/config                   "$stage/example/config"
+
+      - name: Pack tar.xz
+        run: |
+          set -eu
+          cd dist
+          # XZ_OPT=-T0 uses all cores for compression.
+          XZ_OPT=-T0 tar -cJf "envs-${{ matrix.target }}.tar.xz" "envs-${{ matrix.target }}"
+          ls -lh "envs-${{ matrix.target }}.tar.xz"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: envs-${{ matrix.target }}
+          path: dist/envs-${{ matrix.target }}.tar.xz
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - name: Resolve tag
+        id: tag
+        run: |
+          set -eu
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            tag="${{ github.event.inputs.tag }}"
+          else
+            tag="${GITHUB_REF#refs/tags/}"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Create / update GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.tag }}
+          name: ${{ steps.tag.outputs.tag }}
+          draft: false
+          prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/envs-aarch64-macos.tar.xz
+            dist/envs-x86_64-macos.tar.xz
+            dist/envs-aarch64-linux.tar.xz
+            dist/envs-x86_64-linux.tar.xz
