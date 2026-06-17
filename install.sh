@@ -32,6 +32,11 @@
 #   ENVS_TARGET_DIR    default: $HOME/.local/bin
 #   ENVS_ZIG_DIR       default: $HOME/.local/share/envs/zig (managed zig cache)
 #   ENVS_ZIG_VERSION   default: 0.16.0             (min + managed install version)
+#   ENVS_RELEASE_TARBALL  test/CI hook: path to a local envs-<triple>.tar.xz to
+#                         install instead of fetching from GitHub Releases.
+#                         Only honored in release mode. Skips API query + curl.
+#   ENVS_SKIP_BUILD       test/CI hook: =1 to reuse zig-out/bin/envs in dev mode
+#                         instead of running `zig build` again.
 
 set -eu
 
@@ -275,6 +280,12 @@ _do_dev_build() {
     echo "envs: dev mode requires build.zig in $_self_dir" >&2
     exit 1
   fi
+  # Test/CI hook: skip the zig build when zig-out/bin/envs is already present.
+  # Used by tests/install-smoke.bats to avoid invoking zig in every test case.
+  if [ "${ENVS_SKIP_BUILD:-0}" = "1" ] && [ -x "$_self_dir/zig-out/bin/envs" ]; then
+    echo "envs: ENVS_SKIP_BUILD=1, reusing $_self_dir/zig-out/bin/envs"
+    return 0
+  fi
   _resolve_zig
   echo "envs: building (zig build --release=fast) in $_self_dir"
   (cd "$_self_dir" && "$_zig_bin" build --release=fast)
@@ -337,10 +348,22 @@ _release_resolve_url() {
 }
 
 _do_release_install() {
-  _release_resolve_url
   _dl_tmp="$(mktemp -d -t envs-install.XXXXXX)"
-  echo "envs: downloading $_asset_name"
-  curl -fL --retry 3 -o "$_dl_tmp/$_asset_name" "$_release_dl_url"
+  if [ -n "${ENVS_RELEASE_TARBALL:-}" ]; then
+    # Test/CI hook: skip GitHub API + download, use a local tarball directly.
+    if [ ! -f "$ENVS_RELEASE_TARBALL" ]; then
+      echo "envs: ENVS_RELEASE_TARBALL='$ENVS_RELEASE_TARBALL' is not a file" >&2
+      rm -rf "$_dl_tmp"
+      exit 1
+    fi
+    _release_tag_resolved="${_release_tag:-local}"
+    echo "envs: using local tarball $ENVS_RELEASE_TARBALL (tag=$_release_tag_resolved)"
+    cp "$ENVS_RELEASE_TARBALL" "$_dl_tmp/$_asset_name"
+  else
+    _release_resolve_url
+    echo "envs: downloading $_asset_name"
+    curl -fL --retry 3 -o "$_dl_tmp/$_asset_name" "$_release_dl_url"
+  fi
   echo "envs: extracting"
   tar -xJf "$_dl_tmp/$_asset_name" -C "$_dl_tmp"
 
