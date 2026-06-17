@@ -1,6 +1,6 @@
 .{
     .name = .envs,
-    .version = "0.0.2",
+    .version = "0.0.3",
     .minimum_zig_version = "0.16.0",
     .fingerprint = 0xdf9cc0f182b3815e,
     .paths = .{
