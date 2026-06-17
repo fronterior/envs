@@ -146,6 +146,39 @@ teardown() {
   [[ "$output" == *"inactive"* ]]
 }
 
+@test "zsh: dev deactivate restores prior value of overlapping key" {
+  setup_sh="$(print_sh_setup envs-dev-source.sh)"
+  run zsh -fc "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-dev-source-activate dev
+    echo MID=\$KEY_A
+    envs-dev-source-deactivate
+    echo POST=\$KEY_A
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
+}
+
+@test "zsh: dev cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
+  setup_sh="$(print_sh_setup envs-dev-source.sh)"
+  run zsh -fc "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-dev-source-activate dev
+    echo MID=\$KEY_A
+    cd '$REPO_DIR_OTHER'
+    _envs_dev_source_precmd
+    echo POST=\${KEY_A:-UNSET}
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
+}
+
 @test "zsh: dev status shows name/matched/injected keys/dump file when active" {
   setup_sh="$(print_sh_setup envs-dev-source.sh)"
   run zsh -fc "
@@ -298,6 +331,39 @@ teardown() {
   "
   [ "$status" -eq 0 ]
   [[ "$output" == *"inactive"* ]]
+}
+
+@test "bash: dev deactivate restores prior value of overlapping key" {
+  setup_sh="$(print_sh_setup envs-dev-source.sh)"
+  run bash -c "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-dev-source-activate dev
+    echo MID=\$KEY_A
+    envs-dev-source-deactivate
+    echo POST=\$KEY_A
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
+}
+
+@test "bash: dev cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
+  setup_sh="$(print_sh_setup envs-dev-source.sh)"
+  run bash -c "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-dev-source-activate dev
+    echo MID=\$KEY_A
+    cd '$REPO_DIR_OTHER'
+    _envs_dev_source_precmd
+    echo POST=\${KEY_A:-UNSET}
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
 }
 
 @test "bash: dev status shows name/matched/injected keys/dump file when active" {

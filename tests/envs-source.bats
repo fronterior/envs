@@ -168,6 +168,27 @@ teardown() {
   [[ "$output" == *"POST=preexisting"* ]]
 }
 
+@test "zsh: cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
+  # Core regression for the shell-neutral snapshot fix. A user-exported var
+  # that the matched .env overrides must restore to its original value when
+  # routing stops matching — not get unset. Catches both: (a) snapshot grep
+  # missing bash's `declare -x` form, (b) overly broad `unset` on cd-away.
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run zsh -fc "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-source-activate dev
+    echo MID=\$KEY_A
+    cd '$REPO_DIR_OTHER'
+    _envs_source_precmd
+    echo POST=\${KEY_A:-UNSET}
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
+}
+
 # ----- bash -----
 
 @test "bash: source registers activate/deactivate/precmd functions" {
@@ -308,12 +329,6 @@ teardown() {
 }
 
 @test "bash: deactivate restores prior value of overlapping key" {
-  # Known bug: bash's `export -p` emits `declare -x KEY="val"`, but the
-  # restore_keys grep in envs-source.sh only matches `^(export[[:space:]]+)?KEY=`.
-  # In bash the snapshot grep misses, so the key is unset instead of restored.
-  # zsh emits `export KEY=val`, so this case passes there.
-  # Bug reported in plan_mqdjqd15_rn4npb completion report; fix in separate plan.
-  skip "known bug: bash export -p uses 'declare -x' form, not matched by restore grep"
   setup_sh="$(print_sh_setup envs-source.sh)"
   run bash -c "
     $setup_sh
@@ -323,6 +338,27 @@ teardown() {
     echo MID=\$KEY_A
     envs-source-deactivate
     echo POST=\$KEY_A
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MID=devA"* ]]
+  [[ "$output" == *"POST=preexisting"* ]]
+}
+
+@test "bash: cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
+  # Core regression for the shell-neutral snapshot fix. A user-exported var
+  # that the matched .env overrides must restore to its original value when
+  # routing stops matching — not get unset. Catches both: (a) snapshot grep
+  # missing bash's `declare -x` form, (b) overly broad `unset` on cd-away.
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run bash -c "
+    $setup_sh
+    export KEY_A=preexisting
+    cd '$REPO_DIR_DEV'
+    envs-source-activate dev
+    echo MID=\$KEY_A
+    cd '$REPO_DIR_OTHER'
+    _envs_source_precmd
+    echo POST=\${KEY_A:-UNSET}
   "
   [ "$status" -eq 0 ]
   [[ "$output" == *"MID=devA"* ]]

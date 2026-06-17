@@ -29,7 +29,10 @@ envs-source-activate() {
     echo "envs-source: failed to create dump file" >&2
     return 1
   }
-  export -p > "$ENVS_SOURCE_DUMP_FILE"
+  # Use `env` for a shell-neutral KEY=VALUE snapshot. bash's `export -p` emits
+  # `declare -x KEY="val"`, which the restore grep below would miss; `env` is
+  # consistent across zsh / bash / dash / BSD.
+  env > "$ENVS_SOURCE_DUMP_FILE"
 
   ENVS_SOURCE_ACTIVE=1
   ENVS_SOURCE_NAME="$_new_name"
@@ -74,11 +77,15 @@ _envs_source_restore_keys() {
   fi
   for _key in "$@"; do
     [ -z "$_key" ] && continue
-    _dumpline=$(grep -E "^(export[[:space:]]+)?${_key}=" "$ENVS_SOURCE_DUMP_FILE" 2>/dev/null | head -1)
+    # Snapshot is `env` output (KEY=VALUE per line), so a simple anchored
+    # match is enough. Assign with `export "KEY=VALUE"` directly instead of
+    # `eval`ing the line to avoid running shell metacharacters in values.
+    _dumpline=$(grep "^${_key}=" "$ENVS_SOURCE_DUMP_FILE" 2>/dev/null | head -1)
     if [ -z "$_dumpline" ]; then
       unset "$_key"
     else
-      eval "$_dumpline"
+      _value="${_dumpline#*=}"
+      export "${_key}=${_value}"
     fi
   done
 }

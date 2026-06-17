@@ -37,7 +37,3 @@ Cases per shell:
 - `$ENVS_DEV_BIN=envs-dev` for the dev variant
 
 No user dotfiles (`~/.zshrc`, `~/.bashrc`, `~/.config/fish/`, `~/.config/envs/`, `~/.local/bin/envs*`, `~/.local/share/envs/`) are read or written. fish cases run with `fish --no-config`.
-
-## Known issue surfaced by the suite
-
-`bash: deactivate restores prior value of overlapping key` is marked `skip`. `bash`'s `export -p` emits `declare -x KEY="val"`, but `_envs_source_restore_keys` only matches `^(export[[:space:]]+)?KEY=` against the snapshot file. In bash the snapshot grep misses and the key gets unset instead of restored. zsh/fish both pass.
