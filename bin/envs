@@ -66,14 +66,23 @@ _emit_error() {
 
 _usage() {
   echo "usage: envs <env_name> <command...>" >&2
+  echo "       envs --source-match [env_name]" >&2
   exit 2
 }
 
 # ----- arg parsing -----
-if [ "$#" -lt 1 ]; then _usage; fi
-_env="$1"
-shift
-if [ "$#" -lt 1 ]; then _usage; fi
+_source_mode=0
+if [ "${1:-}" = "--source-match" ]; then
+  _source_mode=1
+  shift
+  # In source mode, env_name is optional (empty = match empty env_name rules).
+  _env="${1:-}"
+else
+  if [ "$#" -lt 1 ]; then _usage; fi
+  _env="$1"
+  shift
+  if [ "$#" -lt 1 ]; then _usage; fi
+fi
 
 # ----- context collection -----
 _origin_url=$(git config --get remote.origin.url 2>/dev/null || true)
@@ -97,6 +106,9 @@ _config_dir="${ENVS_CONFIG_DIR:-$HOME/.config/envs}"
 _config_file="$_config_dir/config"
 
 if [ ! -r "$_config_file" ]; then
+  if [ "$_source_mode" -eq 1 ]; then
+    exit 1
+  fi
   _emit_error "config not found at $_config_file (running without env injection)"
   exec "$@"
 fi
@@ -149,7 +161,9 @@ _interpolate_path() {
       case "$_remainder" in
         *:*) ;;  # Has colon — not interpolation form, ignore
         *)
-          echo "envs: warning: unknown variable in path: $_remainder" >&2
+          if [ "$_source_mode" -eq 0 ]; then
+            echo "envs: warning: unknown variable in path: $_remainder" >&2
+          fi
           return 1
           ;;
       esac
@@ -198,7 +212,9 @@ while IFS= read -r _line || [ -n "$_line" ]; do
   case "$_rest" in
     *:*) ;;
     *)
-      _emit_error "skipping malformed line: $_trimmed"
+      if [ "$_source_mode" -eq 0 ]; then
+        _emit_error "skipping malformed line: $_trimmed"
+      fi
       continue
       ;;
   esac
@@ -235,7 +251,9 @@ while IFS= read -r _line || [ -n "$_line" ]; do
       _cv=$(printf '%s' "$_cv" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
       _actual=$(_ctx_value "$_ck")
       if [ "$_actual" = "__ENVS_UNKNOWN_KEY__" ]; then
-        _emit_error "skipping unknown keyword '$_ck' in: $_trimmed"
+        if [ "$_source_mode" -eq 0 ]; then
+          _emit_error "skipping unknown keyword '$_ck' in: $_trimmed"
+        fi
         _bad_key=1
         break
       fi
@@ -266,14 +284,26 @@ done < "$_config_file"
 
 # ----- no match: fail-open -----
 if [ -z "$_matched_path" ]; then
+  if [ "$_source_mode" -eq 1 ]; then
+    exit 1
+  fi
   _emit_nomatch "$_env" "$_ctx_repo" "$_ctx_branch" "$_ctx_current_dir" "$_ctx_org" "$_config_file"
   exec "$@"
 fi
 
 # ----- env file readable check -----
 if [ ! -r "$_matched_path" ]; then
+  if [ "$_source_mode" -eq 1 ]; then
+    exit 1
+  fi
   _emit_error "env file not readable: $_matched_path"
   exec "$@"
+fi
+
+# ----- source mode: just print the resolved path and exit -----
+if [ "$_source_mode" -eq 1 ]; then
+  printf '%s\n' "$_matched_path"
+  exit 0
 fi
 
 _emit_match "$_matched_env" "$_matched_path" "$_matched_line"

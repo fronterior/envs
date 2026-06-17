@@ -75,27 +75,31 @@ else
   echo "WARN: example/config not found at $_example_config - skipping config seed"
 fi
 
+# Detect shell + rc up front so both PATH and envs-source prompts can use them.
+_shell=$(basename "${SHELL:-}")
+_rc=""
+case "$_shell" in
+  zsh) _rc="$HOME/.zshrc" ;;
+  bash)
+    if [ -f "$HOME/.bashrc" ]; then
+      _rc="$HOME/.bashrc"
+    elif [ -f "$HOME/.bash_profile" ]; then
+      _rc="$HOME/.bash_profile"
+    fi
+    ;;
+  fish) _rc="$HOME/.config/fish/config.fish" ;;
+  sh|dash|ash) _rc="$HOME/.profile" ;;
+esac
+
 case ":$PATH:" in
   *":$_target_dir:"*)
     echo "PATH OK: $_target_dir is in PATH"
     ;;
   *)
-    # PATH not set — detect shell, prompt to add
-    _shell=$(basename "${SHELL:-}")
-    _rc=""
-    case "$_shell" in
-      zsh) _rc="$HOME/.zshrc" ;;
-      bash)
-        if [ -f "$HOME/.bashrc" ]; then
-          _rc="$HOME/.bashrc"
-        elif [ -f "$HOME/.bash_profile" ]; then
-          _rc="$HOME/.bash_profile"
-        fi
-        ;;
-      sh|dash|ash) _rc="$HOME/.profile" ;;
-    esac
-
     _path_line='export PATH="$HOME/.local/bin:$PATH"'
+    if [ "$_shell" = "fish" ]; then
+      _path_line='set -gx PATH $HOME/.local/bin $PATH'
+    fi
 
     if [ -z "$_rc" ] || [ ! -e /dev/tty ]; then
       # Can't detect shell or no tty — print manual instruction
@@ -125,5 +129,35 @@ case ":$PATH:" in
     ;;
 esac
 
+# ----- offer to source envs-source.{sh,fish} from rc (virtualenv-style mode) -----
+case "$_shell" in
+  fish) _source_file="$_proj_dir/envs-source.fish" ;;
+  *)    _source_file="$_proj_dir/envs-source.sh" ;;
+esac
+
+if [ -n "$_rc" ] && [ -f "$_source_file" ]; then
+  if grep -qF "envs-source" "$_rc" 2>/dev/null; then
+    echo "envs-source: source line already in $_rc"
+  elif [ ! -e /dev/tty ]; then
+    echo "INFO: envs-source not auto-enabled. To enable later:"
+    echo "  echo 'source $_source_file' >> $_rc"
+  else
+    printf "envs: enable envs-source-* shell functions in %s? [y/N] " "$_rc"
+    _yn2=""
+    read -r _yn2 < /dev/tty || _yn2=""
+    case "$_yn2" in
+      y|Y|yes|YES)
+        printf '\n# Added by envs install.sh\nsource %s\n' "$_source_file" >> "$_rc"
+        echo "added source line to $_rc"
+        echo "  Run: source $_rc  (or open a new shell), then: envs-source-activate"
+        ;;
+      *)
+        echo "skipped — to enable later: echo 'source $_source_file' >> $_rc"
+        ;;
+    esac
+  fi
+fi
+
 echo
 echo "Next: 1) add routing rules to ~/.config/envs/config  2) use 'envs <env_name> <cmd>'"
+echo "      or 'envs-source-activate [name]' for virtualenv-style mode"
