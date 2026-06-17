@@ -139,7 +139,8 @@ For workflows where you want env vars to stick across multiple commands in the s
 envs-source-activate            # uses source-mode rules (empty env_name)
 envs-source-activate dev        # uses rules with env_name = "dev"
 # ... run any number of commands ...
-envs-source-deactivate
+envs-source-status              # inspect current state
+envs-source-deactivate          # restore original env vars
 ```
 
 A `precmd` hook re-evaluates the routing context every shell prompt:
@@ -149,6 +150,16 @@ A `precmd` hook re-evaluates the routing context every shell prompt:
 - No match (e.g. you `cd` out to an unrelated directory) → previously injected keys are restored to their original values.
 
 Calling `envs-source-activate <other>` again switches routing in place — it is **not** nested (virtualenv pattern: re-activating swaps the active env rather than stacking).
+
+### Core functions
+
+| Function                  | Purpose                                                                  |
+|---------------------------|--------------------------------------------------------------------------|
+| `envs-source-activate [name]` | Activate source mode. With no argument, uses rules with an empty `env_name`. With a name, uses rules whose `env_name` matches. |
+| `envs-source-deactivate`  | Deactivate and restore the original values of every key that was injected. |
+| `envs-source-status`      | Print current state to stdout — `inactive`, or `active` with name, matched file, injected keys, and dump file path. |
+
+A prod/dev pair is shipped: `envs-source.sh` (prod, `envs-source-*` functions) and `envs-dev-source.sh` (dev, `envs-dev-source-*` functions). The dev pair uses the same logic with a separate variable namespace so both can coexist for testing.
 
 ### Config syntax for source mode
 
@@ -164,12 +175,82 @@ Source mode without a name argument uses rules with an **empty `env_name`** (jus
 
 Source mode with a name argument (`envs-source-activate dev`) uses the same rules as `envs dev <cmd>` — the `env_name` portion of each rule line acts as the routing key.
 
-### Detecting active state
+### Inspecting state — `envs-source-status`
 
-While source mode is on:
+Inactive:
 
-- `$ENVS_SOURCE_ACTIVE=1` is exported (useful for AI agents, prompt themes, or other tools that want to know).
-- `$ENVS_SOURCE_NAME` holds the active name (empty string for source-mode rules).
+```
+envs-source: inactive
+```
+
+Active:
+
+```
+envs-source: active
+  name:           dev
+  matched:        /Users/me/.config/envs/myapp/.env.dev
+  injected keys:  API_KEY DB_URL FOO
+  dump file:      /tmp/envs-source-dump.XXXXX
+```
+
+### Exported environment variables
+
+While source mode is on, these are exported so other tools (prompts, AI agents, CI scripts) can detect the state without spawning a subprocess:
+
+| Variable                       | When active                                                | When inactive |
+|--------------------------------|------------------------------------------------------------|---------------|
+| `$ENVS_SOURCE_ACTIVE`          | `1`                                                        | unset         |
+| `$ENVS_SOURCE_NAME`            | active name (may be empty string for empty-`env_name` rules) | unset         |
+| `$ENVS_SOURCE_LAST_MATCHED`    | absolute path of the currently matched `.env` file (or empty if no rule matched) | unset |
+| `$ENVS_SOURCE_INJECTED_KEYS`   | space-separated list of keys currently injected            | unset         |
+
+The dev pair exports the same set under the `$ENVS_DEV_SOURCE_*` prefix (`$ENVS_DEV_SOURCE_ACTIVE`, `$ENVS_DEV_SOURCE_NAME`, `$ENVS_DEV_SOURCE_LAST_MATCHED`, `$ENVS_DEV_SOURCE_INJECTED_KEYS`).
+
+### Showing active state in your prompt
+
+**envs-source does not modify your prompt.** All it does is export the variables above on activation and unset them on deactivation. Your `PS1` / `PROMPT` / `fish_prompt` / `starship.toml` is yours — `envs` never touches it.
+
+To surface the active state visually, add a line that references `$ENVS_SOURCE_ACTIVE` / `$ENVS_SOURCE_NAME` to your own shell rc file. The snippets below render a parenthesized tag like `(dev)` or `(prod)` while source mode is on, and nothing when it's off.
+
+**zsh** — add to your `~/.zshrc` (envs does **not** do this automatically):
+
+```sh
+setopt PROMPT_SUBST
+PROMPT='%~ ${ENVS_SOURCE_NAME:+(${ENVS_SOURCE_NAME}) }$ '
+```
+
+**bash** — add to your `~/.bashrc` (envs does **not** do this automatically):
+
+```sh
+PS1='\w ${ENVS_SOURCE_NAME:+(${ENVS_SOURCE_NAME}) }\$ '
+```
+
+**fish** — add inside your `fish_prompt` function in `~/.config/fish/config.fish` (envs does **not** do this automatically):
+
+```fish
+if set -q ENVS_SOURCE_ACTIVE
+  echo -n "($ENVS_SOURCE_NAME) "
+end
+```
+
+**starship** — add a custom module to your `~/.config/starship.toml` (envs does **not** do this automatically):
+
+```toml
+[custom.envs]
+command = 'echo "($ENVS_SOURCE_NAME)"'
+when = '[ -n "$ENVS_SOURCE_ACTIVE" ]'
+```
+
+> **Empty `env_name`**: source-mode rules with an empty `env_name` (e.g. `:./.env.global`) set `$ENVS_SOURCE_NAME` to the empty string, so the examples above render `()` — a visible-but-bare marker. If you'd rather show a fallback label, gate on `$ENVS_SOURCE_ACTIVE` and substitute a default:
+>
+> ```sh
+> # zsh — falls back to (envs) when name is empty
+> PROMPT='%~ ${ENVS_SOURCE_ACTIVE:+(${ENVS_SOURCE_NAME:-envs}) }$ '
+> ```
+
+For the dev pair (`envs-dev-source`), the same pattern applies — swap every `$ENVS_SOURCE_*` reference for `$ENVS_DEV_SOURCE_*` (e.g. `$ENVS_DEV_SOURCE_NAME`) in your rc file. Same separation of concerns: envs only exports; you wire it into your prompt.
+
+> **Performance**: prompts run on every keystroke-cycle, so prefer the exported variables (`$ENVS_SOURCE_ACTIVE` / `$ENVS_SOURCE_NAME`) — zero subprocesses. Calling `envs-source-status` from the prompt forks once per prompt render and is noticeably slower; use it for interactive inspection only.
 
 ### Supported shells
 
