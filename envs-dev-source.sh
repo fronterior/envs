@@ -157,8 +157,10 @@ _envs_dev_source_precmd() {
   [ -z "${ENVS_DEV_SOURCE_ACTIVE:-}" ] && return 0
   # PWD cache — skip the whole eval while the user stays in the same directory.
   # Trade-off: in-place routing changes (e.g. `git checkout` to a branch that
-  # routes differently under the same path) won't be picked up until the user
-  # cd's away and back. Performance > exactness.
+  # routes differently under the same path), or an external
+  # `export ENVS_DEV_SOURCE_NAME=...` outside the public
+  # `envs-dev-source-activate` API, won't be picked up until the user cd's
+  # away and back. Performance > exactness.
   if [ "${ENVS_DEV_SOURCE_LAST_PWD:-__unset__}" = "$PWD" ]; then
     return 0
   fi
