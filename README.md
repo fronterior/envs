@@ -108,8 +108,9 @@ The same keyword pool is used both as conditions (`<keyword:value>` at the start
 | `org`         | The org/user segment of that URL (e.g. `ridi` in `git@github.com:ridi/myapp.git`) |
 | `branch`      | `git symbolic-ref --short HEAD`                            |
 | `current_dir` | `basename "$PWD"`                                          |
+| `name`        | The env_name (the CLI first argument). Path-interpolation only — not usable as a condition. |
 
-If you're not in a git repo, `repo`/`org`/`branch` are empty, so any rule using them never matches. `current_dir` always works — use it as your worktree-less fallback. Unknown keywords (typos like `<rpeo:foo>`) are skipped with a stderr warning.
+If you're not in a git repo, `repo`/`org`/`branch` are empty, so any rule using them never matches. `current_dir` always works — use it as your worktree-less fallback. `<name>` always resolves (it's the CLI arg) — useful for collapsing per-env duplicates into one rule, e.g. `<repo:myapp>development:./<repo>/.env.<name>` and `<repo:myapp>production:./<repo>/.env.<name>`. Unknown keywords (typos like `<rpeo:foo>`) are skipped with a stderr warning.
 
 ## Directory structure example
 

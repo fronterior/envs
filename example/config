@@ -40,3 +40,9 @@
 # Useful when you organize env files under <repo>/<branch>/.env.<env>
 # usage: envs test pnpm vitest
 #test:./<repo>/<branch>/.env.test
+
+# === <name> placeholder = env_name (CLI first arg) ===
+# Lets one rule fit many envs without duplicating the env name in the path.
+# usage: envs development pnpm dev  /  envs production pnpm build
+#<repo:myapp>development:./<repo>/.env.<name>
+#<repo:myapp>production:./<repo>/.env.<name>

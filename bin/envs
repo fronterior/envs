@@ -118,6 +118,15 @@ _ctx_value() {
 # or any unknown keyword appears.
 _interpolate_path() {
   _ip="$1"
+  # <name> = env_name (CLI first arg). Always present in normal flow, guard anyway.
+  case "$_ip" in
+    *'<name>'*)
+      if [ -z "${_env:-}" ]; then
+        return 1
+      fi
+      _ip=$(printf '%s' "$_ip" | sed "s|<name>|$_env|g")
+      ;;
+  esac
   # Each substitution: bail if value empty, otherwise replace globally with '|' delimiter
   # (delimiter must not collide with '/' which is common in paths).
   for _key in repo org branch current_dir; do
