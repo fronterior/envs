@@ -62,7 +62,17 @@ _envs_source_restore_keys() {
   [ -z "${ENVS_SOURCE_INJECTED_KEYS:-}" ] && return 0
   [ -z "${ENVS_SOURCE_DUMP_FILE:-}" ] && return 0
   [ ! -r "$ENVS_SOURCE_DUMP_FILE" ] && return 0
-  for _key in $ENVS_SOURCE_INJECTED_KEYS; do
+  # Word-split the space-separated key list into positional args.
+  # zsh's default (SH_WORD_SPLIT off) does NOT split unquoted $var on whitespace,
+  # so without explicit splitting the loop would iterate once with
+  # $_key="K1 K2 ..." and unset would fail with "invalid parameter name".
+  # In zsh, ${=var} forces splitting; in bash/dash, unquoted $var already splits.
+  if [ -n "${ZSH_VERSION:-}" ]; then
+    eval 'set -- ${=ENVS_SOURCE_INJECTED_KEYS}'
+  else
+    set -- $ENVS_SOURCE_INJECTED_KEYS
+  fi
+  for _key in "$@"; do
     [ -z "$_key" ] && continue
     _dumpline=$(grep -E "^(export[[:space:]]+)?${_key}=" "$ENVS_SOURCE_DUMP_FILE" 2>/dev/null | head -1)
     if [ -z "$_dumpline" ]; then
