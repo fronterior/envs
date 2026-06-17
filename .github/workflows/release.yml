@@ -85,10 +85,69 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # End-to-end install smoke against a built tarball. Gates both release jobs.
+  # Catches install.sh regressions where binary/wrappers don't land on disk
+  # (e.g. v0.0.2 _atomic_install _tmp clobber that left $_envs_home empty).
+  install_smoke:
+    name: install smoke (x86_64-linux)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download x86_64-linux tarball
+        uses: actions/download-artifact@v4
+        with:
+          name: envs-x86_64-linux
+          path: dist
+
+      - name: Install bats
+        run: |
+          set -eu
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq bats
+
+      - name: Setup zig 0.16.0
+        uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Build zig-out for dev-mode smoke
+        run: zig build --release=fast
+
+      - name: Run install smoke
+        env:
+          SMOKE_TARBALL_PATH: ${{ github.workspace }}/dist/envs-x86_64-linux.tar.xz
+        run: |
+          set -eu
+          ls -la "$SMOKE_TARBALL_PATH"
+          # The smoke suite builds its own tarball from the repo tree, but we
+          # also drive a sanity pass against the real CI-built tarball: run
+          # install.sh in release mode pointed at the downloaded artifact and
+          # assert wrappers + binary land on disk in an isolated HOME.
+          smoke_home="$(mktemp -d)"
+          HOME="$smoke_home" SHELL=/bin/bash \
+            ENVS_RELEASE_TARBALL="$SMOKE_TARBALL_PATH" \
+            ./install.sh --release v0.0.smoke --no-rc --no-config
+          test -x "$smoke_home/.local/lib/envs/envs"
+          test -L "$smoke_home/.local/bin/envs"
+          test -f "$smoke_home/.local/share/envs/envs-source.sh"
+          test -f "$smoke_home/.local/share/envs/envs-source.fish"
+          test -f "$smoke_home/.local/share/envs/envs-dev-source.sh"
+          test -f "$smoke_home/.local/share/envs/README.md"
+          test -f "$smoke_home/.local/share/envs/example/config"
+          echo "real-tarball smoke: PASS"
+
+          # Then run the full bats suite (synthesizes its own tarball from the
+          # repo, exercises dev mode against zig-out, and end-to-end sources
+          # the staged wrappers through bash).
+          bats tests/install-smoke.bats
+
   # Formal release: only on tag pushes (v*) or workflow_dispatch.
   release:
     name: release (tag)
-    needs: build
+    needs: [build, install_smoke]
     if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
@@ -133,7 +192,7 @@ jobs:
   # `install.sh --branch <name>` reads from these via the GitHub Release API.
   branch_release:
     name: release (branch)
-    needs: build
+    needs: [build, install_smoke]
     if: startsWith(github.ref, 'refs/heads/')
     runs-on: ubuntu-latest
     steps:
