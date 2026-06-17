@@ -59,11 +59,18 @@ EOF
   # (the dev variant calls `envs-dev`, which doesn't exist outside install.sh).
   BIN_DIR="$ISOLATED_HOME/bin"
   mkdir -p "$BIN_DIR"
-  cp "$REPO_ROOT/bin/envs" "$BIN_DIR/envs"
+  # Prefer the Zig-built binary if present (zig-out/bin/envs); otherwise fall
+  # back to the sh implementation in bin/envs. This lets the same bats suite
+  # exercise either implementation as long as `zig build` was run beforehand.
+  if [ -x "$REPO_ROOT/zig-out/bin/envs" ]; then
+    cp "$REPO_ROOT/zig-out/bin/envs" "$BIN_DIR/envs"
+  else
+    cp "$REPO_ROOT/bin/envs" "$BIN_DIR/envs"
+  fi
   chmod +x "$BIN_DIR/envs"
   # envs-dev is just a duplicate of envs for routing purposes; the source script
   # only uses it for `envs-dev --source-match`, which is identical behavior.
-  cp "$REPO_ROOT/bin/envs" "$BIN_DIR/envs-dev"
+  cp "$BIN_DIR/envs" "$BIN_DIR/envs-dev"
   chmod +x "$BIN_DIR/envs-dev"
   export PATH="$BIN_DIR:$PATH"
   export ENVS_DEV_BIN="envs-dev"
