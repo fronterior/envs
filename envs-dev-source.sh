@@ -40,6 +40,63 @@ envs-dev-source-deactivate() {
   unset ENVS_DEV_SOURCE_ACTIVE ENVS_DEV_SOURCE_NAME ENVS_DEV_SOURCE_DUMP_FILE ENVS_DEV_SOURCE_INJECTED_KEYS ENVS_DEV_SOURCE_LAST_MATCHED
 }
 
+envs-dev-source-status() {
+  if [ -z "${ENVS_DEV_SOURCE_ACTIVE:-}" ]; then
+    echo "envs-dev-source: inactive"
+    return 0
+  fi
+
+  echo "envs-dev-source: active"
+
+  if [ -n "${ENVS_DEV_SOURCE_NAME:-}" ]; then
+    echo "  name:           ${ENVS_DEV_SOURCE_NAME}"
+  else
+    echo "  name:           (empty)"
+  fi
+
+  if [ -n "${ENVS_DEV_SOURCE_LAST_MATCHED:-}" ]; then
+    echo "  matched:        ${ENVS_DEV_SOURCE_LAST_MATCHED}"
+  else
+    echo "  matched:        (none)"
+  fi
+
+  # Normalize injected keys: collapse whitespace, trim leading/trailing spaces.
+  _keys_raw="${ENVS_DEV_SOURCE_INJECTED_KEYS:-}"
+  if [ -n "$_keys_raw" ]; then
+    if [ -n "${ZSH_VERSION:-}" ]; then
+      eval 'set -- ${=_keys_raw}'
+    else
+      set -- $_keys_raw
+    fi
+    _keys_clean=""
+    for _key in "$@"; do
+      [ -z "$_key" ] && continue
+      if [ -z "$_keys_clean" ]; then
+        _keys_clean="$_key"
+      else
+        _keys_clean="${_keys_clean} ${_key}"
+      fi
+    done
+    if [ -n "$_keys_clean" ]; then
+      echo "  injected keys:  ${_keys_clean}"
+    else
+      echo "  injected keys:  (none)"
+    fi
+  else
+    echo "  injected keys:  (none)"
+  fi
+
+  if [ -n "${ENVS_DEV_SOURCE_DUMP_FILE:-}" ]; then
+    if [ -f "$ENVS_DEV_SOURCE_DUMP_FILE" ]; then
+      echo "  dump file:      ${ENVS_DEV_SOURCE_DUMP_FILE}"
+    else
+      echo "  dump file:      ${ENVS_DEV_SOURCE_DUMP_FILE} (missing)"
+    fi
+  else
+    echo "  dump file:      (none)"
+  fi
+}
+
 _envs_dev_source_restore_keys() {
   [ -z "${ENVS_DEV_SOURCE_INJECTED_KEYS:-}" ] && return 0
   [ -z "${ENVS_DEV_SOURCE_DUMP_FILE:-}" ] && return 0
