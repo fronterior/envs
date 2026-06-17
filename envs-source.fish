@@ -117,7 +117,6 @@ function _envs_source_precmd --on-event fish_prompt
 
     set -gx ENVS_SOURCE_INJECTED_KEYS "$_new_keys"
     if test "$ENVS_SOURCE_LAST_MATCHED" != "$_matched"
-        echo "envs-source: injected $_matched" >&2
         set -gx ENVS_SOURCE_LAST_MATCHED "$_matched"
     end
 end

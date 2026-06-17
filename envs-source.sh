@@ -221,7 +221,6 @@ _envs_source_precmd() {
 
   ENVS_SOURCE_INJECTED_KEYS="$_new_keys"
   if [ "${ENVS_SOURCE_LAST_MATCHED:-}" != "$_matched" ]; then
-    echo "envs-source: injected $_matched" >&2
     ENVS_SOURCE_LAST_MATCHED="$_matched"
   fi
   ENVS_SOURCE_LAST_PWD="$PWD"
