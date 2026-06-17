@@ -1,3 +1,0 @@
-#!/bin/sh
-# envs-dev — dev-build entry point. Same as envs in this worktree.
-exec "$(cd "$(dirname "$0")" && pwd)/envs" "$@"
