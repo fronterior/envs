@@ -52,6 +52,136 @@ test "findOriginUrl: with comments and quoted url" {
     try std.testing.expectEqualStrings("https://github.com/ridi/myapp.git", url);
 }
 
+// ----- context.readOriginUrl + resolveConfigDir (worktree support) -----
+//
+// Each test builds a mock layout inside std.testing.tmpDir() and exercises
+// readOriginUrl with absolute paths so std.fs.path.resolve behaves the same
+// as in production (where gitdir is always absolute).
+
+const test_origin_cfg = "[core]\n    repositoryformatversion = 0\n[remote \"origin\"]\n    url = git@github.com:ridi/myapp.git\n";
+
+fn dupeAbs(arena: std.mem.Allocator, dir: std.Io.Dir, sub: []const u8) ![]const u8 {
+    var buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
+    const n = try dir.realPathFile(std.testing.io, sub, &buf);
+    return try arena.dupe(u8, buf[0..n]);
+}
+
+test "readOriginUrl: regular repo reads gitdir/config directly" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // Layout: <tmp>/regular/.git/config
+    try tmp.dir.createDirPath(tio, "regular/.git");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "regular/.git/config", .data = test_origin_cfg });
+
+    const gitdir = try dupeAbs(a, tmp.dir, "regular/.git");
+    const url = try context.readOriginUrl(a, tio, gitdir);
+    try std.testing.expectEqualStrings("git@github.com:ridi/myapp.git", url);
+}
+
+test "readOriginUrl: worktree with absolute commondir reads main repo config" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // Layout:
+    //   <tmp>/main/.git/config                  ← real config
+    //   <tmp>/main/.git/worktrees/wt/commondir  ← absolute path to <tmp>/main/.git
+    try tmp.dir.createDirPath(tio, "main/.git/worktrees/wt");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "main/.git/config", .data = test_origin_cfg });
+    const main_gitdir_abs = try dupeAbs(a, tmp.dir, "main/.git");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "main/.git/worktrees/wt/commondir", .data = main_gitdir_abs });
+
+    const wt_gitdir = try dupeAbs(a, tmp.dir, "main/.git/worktrees/wt");
+    const url = try context.readOriginUrl(a, tio, wt_gitdir);
+    try std.testing.expectEqualStrings("git@github.com:ridi/myapp.git", url);
+}
+
+test "readOriginUrl: worktree with relative commondir reads main repo config" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // Layout same as absolute case, but commondir holds "../..\n" — the
+    // standard relative form git writes for worktrees.
+    try tmp.dir.createDirPath(tio, "main/.git/worktrees/wt");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "main/.git/config", .data = test_origin_cfg });
+    try tmp.dir.writeFile(tio, .{ .sub_path = "main/.git/worktrees/wt/commondir", .data = "../..\n" });
+
+    const wt_gitdir = try dupeAbs(a, tmp.dir, "main/.git/worktrees/wt");
+    const url = try context.readOriginUrl(a, tio, wt_gitdir);
+    try std.testing.expectEqualStrings("git@github.com:ridi/myapp.git", url);
+}
+
+test "readOriginUrl: missing commondir falls back to gitdir" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // No commondir file — same shape as a regular repo. Must read gitdir/config.
+    try tmp.dir.createDirPath(tio, "plain/.git");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "plain/.git/config", .data = test_origin_cfg });
+
+    const gitdir = try dupeAbs(a, tmp.dir, "plain/.git");
+    const url = try context.readOriginUrl(a, tio, gitdir);
+    try std.testing.expectEqualStrings("git@github.com:ridi/myapp.git", url);
+}
+
+test "readOriginUrl: empty commondir falls back to gitdir" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // commondir present but empty (whitespace only) — fallback to gitdir.
+    try tmp.dir.createDirPath(tio, "empty/.git");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "empty/.git/config", .data = test_origin_cfg });
+    try tmp.dir.writeFile(tio, .{ .sub_path = "empty/.git/commondir", .data = "   \n" });
+
+    const gitdir = try dupeAbs(a, tmp.dir, "empty/.git");
+    const url = try context.readOriginUrl(a, tio, gitdir);
+    try std.testing.expectEqualStrings("git@github.com:ridi/myapp.git", url);
+}
+
+test "readOriginUrl: commondir target without config returns empty" {
+    var tmp = std.testing.tmpDir(.{});
+    defer tmp.cleanup();
+    const tio = std.testing.io;
+
+    var arena_state = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    // commondir points to a dir that exists but has no `config` file — fail-open ("").
+    try tmp.dir.createDirPath(tio, "main/.git/worktrees/wt");
+    const main_gitdir_abs = try dupeAbs(a, tmp.dir, "main/.git");
+    try tmp.dir.writeFile(tio, .{ .sub_path = "main/.git/worktrees/wt/commondir", .data = main_gitdir_abs });
+
+    const wt_gitdir = try dupeAbs(a, tmp.dir, "main/.git/worktrees/wt");
+    const url = try context.readOriginUrl(a, tio, wt_gitdir);
+    try std.testing.expectEqualStrings("", url);
+}
+
 // ----- rule parser -----
 
 test "parseLine: blank/comment skipped" {

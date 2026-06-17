@@ -124,9 +124,30 @@ fn readBranch(arena: std.mem.Allocator, io: Io, gitdir: []const u8) ![]const u8 
     return "";
 }
 
-/// Read [remote "origin"].url from `gitdir`/config. Returns "" if not found.
-fn readOriginUrl(arena: std.mem.Allocator, io: Io, gitdir: []const u8) ![]const u8 {
-    const cfg_path = try std.fs.path.join(arena, &.{ gitdir, "config" });
+/// Resolve the directory that contains `config` for a given `gitdir`.
+///
+/// For a normal repo this is `gitdir` itself. For a worktree, `gitdir` is
+/// the per-worktree directory (e.g. `<main>/.git/worktrees/<name>`); its
+/// `config` lives in the main repo's `.git` directory, reachable via the
+/// `commondir` file. The file may contain an absolute path or a relative
+/// one (resolved against `gitdir`).
+///
+/// Falls back to `gitdir` itself when `commondir` is missing or empty.
+pub fn resolveConfigDir(arena: std.mem.Allocator, io: Io, gitdir: []const u8) ![]const u8 {
+    const commondir_path = try std.fs.path.join(arena, &.{ gitdir, "commondir" });
+    const raw = Io.Dir.cwd().readFileAlloc(io, commondir_path, arena, .limited(4096)) catch return gitdir;
+    const trimmed = std.mem.trim(u8, raw, " \t\r\n");
+    if (trimmed.len == 0) return gitdir;
+    if (std.fs.path.isAbsolute(trimmed)) return try arena.dupe(u8, trimmed);
+    return try std.fs.path.resolve(arena, &.{ gitdir, trimmed });
+}
+
+/// Read [remote "origin"].url from the repo config. For worktrees the
+/// config lives in the main repo (reached via `commondir`), not in the
+/// per-worktree gitdir. Returns "" if not found.
+pub fn readOriginUrl(arena: std.mem.Allocator, io: Io, gitdir: []const u8) ![]const u8 {
+    const cfg_dir = try resolveConfigDir(arena, io, gitdir);
+    const cfg_path = try std.fs.path.join(arena, &.{ cfg_dir, "config" });
     const contents = Io.Dir.cwd().readFileAlloc(io, cfg_path, arena, .limited(1 * 1024 * 1024)) catch return "";
     return findOriginUrl(contents);
 }
