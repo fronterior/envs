@@ -184,6 +184,15 @@ echo 'source ~/.local/share/envs/envs-source.fish' >> ~/.config/fish/config.fish
 └── ...
 ```
 
+## Tests
+
+```sh
+brew install bats-core  # if missing
+bats tests/
+```
+
+Covers `envs-source.sh`, `envs-dev-source.sh`, and `envs-source.fish` across zsh, bash, and fish. See `tests/README.md` for details.
+
 ## License
 
 MIT
