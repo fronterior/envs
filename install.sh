@@ -213,30 +213,30 @@ _resolve_zig() {
   _zig_url="https://ziglang.org/download/${_zig_min_version}/${_zig_tar}"
 
   mkdir -p "$_zig_install_dir"
-  _tmp="$(mktemp -d -t envs-zig.XXXXXX)"
+  _zig_tmp="$(mktemp -d -t envs-zig.XXXXXX)"
   echo "envs: downloading $_zig_url"
   if _have curl; then
-    curl -fL --retry 3 -o "$_tmp/$_zig_tar" "$_zig_url"
+    curl -fL --retry 3 -o "$_zig_tmp/$_zig_tar" "$_zig_url"
   elif _have wget; then
-    wget -O "$_tmp/$_zig_tar" "$_zig_url"
+    wget -O "$_zig_tmp/$_zig_tar" "$_zig_url"
   else
     echo "envs: need curl or wget to download zig" >&2
     exit 1
   fi
 
   echo "envs: extracting zig"
-  tar -xJf "$_tmp/$_zig_tar" -C "$_tmp"
-  _extracted="$(find "$_tmp" -maxdepth 1 -mindepth 1 -type d -name 'zig-*' | head -n1)"
+  tar -xJf "$_zig_tmp/$_zig_tar" -C "$_zig_tmp"
+  _extracted="$(find "$_zig_tmp" -maxdepth 1 -mindepth 1 -type d -name 'zig-*' | head -n1)"
   if [ -z "$_extracted" ] || [ ! -x "$_extracted/zig" ]; then
     echo "envs: zig extraction failed" >&2
-    rm -rf "$_tmp"
+    rm -rf "$_zig_tmp"
     exit 1
   fi
 
   # Move into managed dir (replace any partial install).
   rm -rf "$_zig_install_dir"
   mv "$_extracted" "$_zig_install_dir"
-  rm -rf "$_tmp"
+  rm -rf "$_zig_tmp"
   if [ ! -x "$_zig_bin" ]; then
     echo "envs: managed zig binary not found at $_zig_bin" >&2
     exit 1
@@ -249,10 +249,10 @@ _atomic_install() {
   _src="$1"; _dst="$2"
   _dst_dir="$(dirname "$_dst")"
   mkdir -p "$_dst_dir"
-  _tmp="$_dst.new.$$"
-  cp "$_src" "$_tmp"
-  chmod 0755 "$_tmp"
-  mv -f "$_tmp" "$_dst"
+  _atmp="$_dst.new.$$"
+  cp "$_src" "$_atmp"
+  chmod 0755 "$_atmp"
+  mv -f "$_atmp" "$_dst"
 }
 
 _link_force() {
@@ -338,16 +338,16 @@ _release_resolve_url() {
 
 _do_release_install() {
   _release_resolve_url
-  _tmp="$(mktemp -d -t envs-install.XXXXXX)"
+  _dl_tmp="$(mktemp -d -t envs-install.XXXXXX)"
   echo "envs: downloading $_asset_name"
-  curl -fL --retry 3 -o "$_tmp/$_asset_name" "$_release_dl_url"
+  curl -fL --retry 3 -o "$_dl_tmp/$_asset_name" "$_release_dl_url"
   echo "envs: extracting"
-  tar -xJf "$_tmp/$_asset_name" -C "$_tmp"
+  tar -xJf "$_dl_tmp/$_asset_name" -C "$_dl_tmp"
 
-  _bin_src="$(find "$_tmp" -maxdepth 3 -type f -name envs -perm -u+x | head -n1)"
+  _bin_src="$(find "$_dl_tmp" -maxdepth 3 -type f -name envs -perm -u+x | head -n1)"
   if [ -z "$_bin_src" ] || [ ! -x "$_bin_src" ]; then
     echo "envs: extracted tarball missing executable 'envs'" >&2
-    rm -rf "$_tmp"
+    rm -rf "$_dl_tmp"
     exit 1
   fi
   _atomic_install "$_bin_src" "$_lib_dir/envs"
@@ -356,8 +356,8 @@ _do_release_install() {
   # The tarball also carries source files + example. Stage them under $_envs_home
   # so that rc-file source lines have a stable absolute path.
   mkdir -p "$_envs_home"
-  _root_dir="$(find "$_tmp" -maxdepth 2 -mindepth 1 -type d | head -n1)"
-  if [ -z "$_root_dir" ]; then _root_dir="$_tmp"; fi
+  _root_dir="$(find "$_dl_tmp" -maxdepth 2 -mindepth 1 -type d | head -n1)"
+  if [ -z "$_root_dir" ]; then _root_dir="$_dl_tmp"; fi
   for _f in envs-source.sh envs-dev-source.sh envs-source.fish; do
     if [ -f "$_root_dir/$_f" ]; then
       cp "$_root_dir/$_f" "$_envs_home/$_f"
@@ -373,7 +373,7 @@ _do_release_install() {
 
   # Future config seed + rc lines reference this stable dir.
   _proj_dir="$_envs_home"
-  rm -rf "$_tmp"
+  rm -rf "$_dl_tmp"
 }
 
 # ---------- dispatch ----------
