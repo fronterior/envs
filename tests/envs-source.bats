@@ -168,6 +168,16 @@ teardown() {
   [[ "$output" == *"POST=preexisting"* ]]
 }
 
+@test "zsh: status shows 'inactive' when not active" {
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run zsh -fc "
+    $setup_sh
+    envs-source-status
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inactive"* ]]
+}
+
 @test "zsh: cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
   # Core regression for the shell-neutral snapshot fix. A user-exported var
   # that the matched .env overrides must restore to its original value when
@@ -187,6 +197,27 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"MID=devA"* ]]
   [[ "$output" == *"POST=preexisting"* ]]
+}
+
+@test "zsh: status shows name/matched/injected keys/dump file when active" {
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run zsh -fc "
+    $setup_sh
+    cd '$REPO_DIR_DEV'
+    envs-source-activate dev
+    envs-source-status
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"active"* ]]
+  [[ "$output" == *"name:"* ]]
+  [[ "$output" == *"dev"* ]]
+  [[ "$output" == *"matched:"* ]]
+  [[ "$output" == *".env.dev"* ]]
+  [[ "$output" == *"injected keys:"* ]]
+  [[ "$output" == *"KEY_A"* ]]
+  [[ "$output" == *"KEY_B"* ]]
+  [[ "$output" == *"KEY_C"* ]]
+  [[ "$output" == *"dump file:"* ]]
 }
 
 # ----- bash -----
@@ -344,6 +375,16 @@ teardown() {
   [[ "$output" == *"POST=preexisting"* ]]
 }
 
+@test "bash: status shows 'inactive' when not active" {
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run bash -c "
+    $setup_sh
+    envs-source-status
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"inactive"* ]]
+}
+
 @test "bash: cd to non-matching dir restores pre-existing exported var (snapshot regression)" {
   # Core regression for the shell-neutral snapshot fix. A user-exported var
   # that the matched .env overrides must restore to its original value when
@@ -363,4 +404,25 @@ teardown() {
   [ "$status" -eq 0 ]
   [[ "$output" == *"MID=devA"* ]]
   [[ "$output" == *"POST=preexisting"* ]]
+}
+
+@test "bash: status shows name/matched/injected keys/dump file when active" {
+  setup_sh="$(print_sh_setup envs-source.sh)"
+  run bash -c "
+    $setup_sh
+    cd '$REPO_DIR_DEV'
+    envs-source-activate dev
+    envs-source-status
+  "
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"active"* ]]
+  [[ "$output" == *"name:"* ]]
+  [[ "$output" == *"dev"* ]]
+  [[ "$output" == *"matched:"* ]]
+  [[ "$output" == *".env.dev"* ]]
+  [[ "$output" == *"injected keys:"* ]]
+  [[ "$output" == *"KEY_A"* ]]
+  [[ "$output" == *"KEY_B"* ]]
+  [[ "$output" == *"KEY_C"* ]]
+  [[ "$output" == *"dump file:"* ]]
 }
