@@ -89,7 +89,6 @@ _envs_dev_source_precmd() {
 
   ENVS_DEV_SOURCE_INJECTED_KEYS="$_new_keys"
   if [ "${ENVS_DEV_SOURCE_LAST_MATCHED:-}" != "$_matched" ]; then
-    echo "envs-dev-source: injected $_matched" >&2
     ENVS_DEV_SOURCE_LAST_MATCHED="$_matched"
   fi
 }
