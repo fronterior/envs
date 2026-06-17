@@ -6,14 +6,19 @@
 #               Ensures zig >= 0.16, runs `zig build`, installs a dev wrapper
 #               symlink at $TARGET_DIR/envs-dev pointing at <repo>/zig-out/bin/envs.
 #               Existing prod $TARGET_DIR/envs is untouched until --promote.
-#   release   — curl-piped single file, or --release [tag] given.
+#   release   — curl-piped single file, or --release [tag] / --branch <name> given.
 #               Downloads the matching tarball from GitHub Releases and installs
 #               the binary at $LIB_DIR/envs with symlink $TARGET_DIR/envs.
+#               --branch resolves to the rolling tag `branch-<sanitized>` built
+#               by the workflow on every push to that branch.
 #   --promote — only meaningful in a checkout. Builds Zig binary with ReleaseFast
 #               and atomically replaces $LIB_DIR/envs + $TARGET_DIR/envs symlink.
 #
 # Flags:
 #   --release [tag]   force end-user mode (optional explicit tag like v0.1.0)
+#   --branch <name>   end-user mode against a per-branch prebuilt tag
+#                     (tag = branch-<sanitized-name>; sanitize rule documented
+#                     below in _sanitize_branch — must match release.yml).
 #   --promote         dev -> prod promote (build local zig binary into prod slot)
 #   --dev             force dev mode (require build.zig in script dir)
 #   --no-config       skip example/config seed
@@ -40,9 +45,26 @@ _zig_min_version="${ENVS_ZIG_VERSION:-0.16.0}"
 
 _mode=""          # "dev" | "release" — resolved below
 _release_tag=""   # explicit tag if --release vX.Y.Z given (else "latest")
+_branch_name=""   # original branch name from --branch (informational)
 _promote=0
 _seed_config=1
 _touch_rc=1
+
+# Sanitize a branch name to a GitHub-tag-safe slug.
+# Must match the regex in .github/workflows/release.yml branch_release job.
+#   * Allowed: [A-Za-z0-9._-]
+#   * Everything else (including '/') -> '-'
+#   * Collapse repeated '-' to one, strip leading/trailing '-'.
+# Sets $_sanitized_branch.
+_sanitize_branch() {
+  _raw="$1"
+  _sanitized_branch="$(printf '%s' "$_raw" | tr -c 'A-Za-z0-9._-' '-')"
+  _sanitized_branch="$(printf '%s' "$_sanitized_branch" | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+  if [ -z "$_sanitized_branch" ]; then
+    echo "envs: --branch '$_raw' sanitizes to empty string" >&2
+    exit 2
+  fi
+}
 
 # ---------- arg parse ----------
 while [ $# -gt 0 ]; do
@@ -55,12 +77,33 @@ while [ $# -gt 0 ]; do
       fi
       ;;
     --release=*) _mode="release"; _release_tag="${1#--release=}" ;;
+    --branch)
+      _mode="release"
+      if [ $# -lt 2 ] || [ "${2#-}" != "$2" ]; then
+        echo "envs: --branch requires a branch name" >&2
+        exit 2
+      fi
+      _branch_name="$2"
+      _sanitize_branch "$_branch_name"
+      _release_tag="branch-$_sanitized_branch"
+      shift
+      ;;
+    --branch=*)
+      _mode="release"
+      _branch_name="${1#--branch=}"
+      if [ -z "$_branch_name" ]; then
+        echo "envs: --branch requires a branch name" >&2
+        exit 2
+      fi
+      _sanitize_branch "$_branch_name"
+      _release_tag="branch-$_sanitized_branch"
+      ;;
     --promote)   _promote=1 ;;
     --dev)       _mode="dev" ;;
     --no-config) _seed_config=0 ;;
     --no-rc)     _touch_rc=0 ;;
     -h|--help)
-      sed -n '2,30p' "$0"
+      sed -n '2,40p' "$0"
       exit 0
       ;;
     *)
@@ -94,6 +137,8 @@ fi
 
 if [ "$_promote" = "1" ]; then
   echo "envs: install mode = $_mode (+promote)"
+elif [ -n "$_branch_name" ]; then
+  echo "envs: install mode = $_mode (branch '$_branch_name' -> tag $_release_tag)"
 else
   echo "envs: install mode = $_mode"
 fi
@@ -482,7 +527,11 @@ case "$_mode" in
     fi
     ;;
   release)
-    echo "envs: installed $_release_tag_resolved at $_lib_dir/envs (-> $_target_dir/envs)"
+    if [ -n "$_branch_name" ]; then
+      echo "envs: installed branch '$_branch_name' build ($_release_tag_resolved) at $_lib_dir/envs (-> $_target_dir/envs)"
+    else
+      echo "envs: installed $_release_tag_resolved at $_lib_dir/envs (-> $_target_dir/envs)"
+    fi
     ;;
 esac
 echo "Next: 1) add routing rules to ~/.config/envs/config  2) use 'envs <env_name> <cmd>'"

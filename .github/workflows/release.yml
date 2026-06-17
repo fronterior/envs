@@ -1,9 +1,21 @@
 name: release
 
+# Two trigger modes:
+#   * tag push (v*)     -> formal release. tag_name = the pushed tag.
+#                          make_latest = true (default for action-gh-release).
+#   * branch push (**)  -> per-branch prebuilt artifact. tag_name = branch-<sanitized>.
+#                          prerelease = true, make_latest = false (does not steal latest).
+#                          Each push to the same branch updates the same tag.
+#
+# Branch artifact mode lets `install.sh --branch <name>` fetch prebuilt zig binaries
+# from a feature branch without needing zig installed locally and without using gh CLI.
+
 on:
   push:
     tags:
       - 'v*'
+    branches:
+      - '**'
   workflow_dispatch:
     inputs:
       tag:
@@ -73,9 +85,11 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  # Formal release: only on tag pushes (v*) or workflow_dispatch.
   release:
-    name: release
+    name: release (tag)
     needs: build
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -108,6 +122,70 @@ jobs:
           name: ${{ steps.tag.outputs.tag }}
           draft: false
           prerelease: false
+          fail_on_unmatched_files: true
+          files: |
+            dist/envs-aarch64-macos.tar.xz
+            dist/envs-x86_64-macos.tar.xz
+            dist/envs-aarch64-linux.tar.xz
+            dist/envs-x86_64-linux.tar.xz
+
+  # Branch artifact: every non-tag branch push gets a rolling `branch-<sanitized>` release.
+  # `install.sh --branch <name>` reads from these via the GitHub Release API.
+  branch_release:
+    name: release (branch)
+    needs: build
+    if: startsWith(github.ref, 'refs/heads/')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: List artifacts
+        run: ls -la dist
+
+      - name: Compute branch tag
+        id: btag
+        run: |
+          set -eu
+          branch="${GITHUB_REF#refs/heads/}"
+          # Sanitize: keep [A-Za-z0-9._-], everything else (incl. /) -> '-'.
+          # Same rule duplicated in install.sh _sanitize_branch().
+          sanitized="$(printf '%s' "$branch" | tr -c 'A-Za-z0-9._-' '-')"
+          # Collapse runs of '-' to one, strip leading/trailing '-' for tidiness.
+          sanitized="$(printf '%s' "$sanitized" | sed -e 's/--*/-/g' -e 's/^-//' -e 's/-$//')"
+          if [ -z "$sanitized" ]; then
+            echo "branch sanitized to empty string, refusing" >&2
+            exit 1
+          fi
+          echo "branch=$branch"           >> "$GITHUB_OUTPUT"
+          echo "sanitized=$sanitized"     >> "$GITHUB_OUTPUT"
+          echo "tag=branch-$sanitized"    >> "$GITHUB_OUTPUT"
+          echo "envs: branch release tag = branch-$sanitized (from $branch)"
+
+      - name: Create / update branch prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.btag.outputs.tag }}
+          name: 'Branch build: ${{ steps.btag.outputs.branch }}'
+          body: |
+            Rolling prebuilt artifacts for branch `${{ steps.btag.outputs.branch }}`.
+            This release is automatically replaced on every push to the branch.
+
+            Install with:
+
+            ```sh
+            curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${{ steps.btag.outputs.branch }}/install.sh \
+              | sh -s -- --branch ${{ steps.btag.outputs.branch }}
+            ```
+          draft: false
+          prerelease: true
+          make_latest: false
           fail_on_unmatched_files: true
           files: |
             dist/envs-aarch64-macos.tar.xz

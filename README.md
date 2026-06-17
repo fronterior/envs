@@ -28,6 +28,23 @@ curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/install.sh | s
 
 If `~/.local/bin` is not in your `PATH`, the installer will detect your shell and offer to add the export line to `~/.zshrc` / `~/.bashrc` / `~/.profile` (asks for confirmation).
 
+### Pre-built branch artifacts
+
+Every push to any branch produces a rolling prebuilt release tagged `branch-<sanitized-name>` (one per branch, replaced on each push, marked as a prerelease). Install one without needing zig:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/install.sh \
+  | sh -s -- --branch <name>
+```
+
+Branch name sanitization (must match between `install.sh` and the workflow):
+
+- Allowed characters: `A-Z` `a-z` `0-9` `.` `_` `-`
+- Anything else (including `/`) becomes `-`
+- Repeated `-` collapsed; leading/trailing `-` stripped
+
+So `feat/foo-bar` resolves to tag `branch-feat-foo-bar`, `main` resolves to `branch-main`.
+
 ## Uninstall
 
 ```sh
@@ -192,6 +209,16 @@ bats tests/
 ```
 
 Covers `envs-source.sh`, `envs-dev-source.sh`, and `envs-source.fish` across zsh, bash, and fish. See `tests/README.md` for details.
+
+### Bumping the version (maintainer)
+
+`src/version.zig` is the single source of truth. `build.zig.zon`'s `.version` mirrors it (verified at every `zig build`). To bump:
+
+1. Edit the `VERSION` constant in `src/version.zig`.
+2. Run `zig build -Dskip-version-check=true sync-version` to rewrite `build.zig.zon`.
+3. Commit both files together.
+
+A plain `zig build` afterward should pass without `-Dskip-version-check`.
 
 ## License
 
