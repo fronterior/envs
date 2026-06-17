@@ -19,7 +19,9 @@ envs-source-activate() {
     ENVS_SOURCE_NAME="$_new_name"
     ENVS_SOURCE_INJECTED_KEYS=""
     ENVS_SOURCE_LAST_MATCHED=""
-    export ENVS_SOURCE_NAME ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED
+    # Reset PWD cache so next precmd re-evaluates under the new name.
+    ENVS_SOURCE_LAST_PWD=""
+    export ENVS_SOURCE_NAME ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED ENVS_SOURCE_LAST_PWD
     _envs_source_precmd
     return 0
   fi
@@ -38,8 +40,10 @@ envs-source-activate() {
   ENVS_SOURCE_NAME="$_new_name"
   ENVS_SOURCE_INJECTED_KEYS=""
   ENVS_SOURCE_LAST_MATCHED=""
+  # PWD cache — empty forces full evaluation on first precmd.
+  ENVS_SOURCE_LAST_PWD=""
   export ENVS_SOURCE_ACTIVE ENVS_SOURCE_NAME ENVS_SOURCE_DUMP_FILE
-  export ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED
+  export ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED ENVS_SOURCE_LAST_PWD
 
   _envs_source_register_hook
   _envs_source_precmd
@@ -56,7 +60,7 @@ envs-source-deactivate() {
     rm -f "$ENVS_SOURCE_DUMP_FILE"
   fi
   unset ENVS_SOURCE_ACTIVE ENVS_SOURCE_NAME ENVS_SOURCE_DUMP_FILE
-  unset ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED
+  unset ENVS_SOURCE_INJECTED_KEYS ENVS_SOURCE_LAST_MATCHED ENVS_SOURCE_LAST_PWD
 }
 
 envs-source-status() {
@@ -118,52 +122,86 @@ envs-source-status() {
 
 # Restore the keys we previously injected to their snapshotted values
 # (or unset them if they weren't set before activation).
+#
+# Single awk scan over the snapshot file emits one line per injected key:
+#   KEY<TAB>1<TAB>VALUE   when the key exists in the snapshot (restore)
+#   KEY<TAB>0             when the key was not in the snapshot (unset)
+# This keeps subprocess count at exactly 1 regardless of key count.
 _envs_source_restore_keys() {
   [ -z "${ENVS_SOURCE_INJECTED_KEYS:-}" ] && return 0
   [ -z "${ENVS_SOURCE_DUMP_FILE:-}" ] && return 0
   [ ! -r "$ENVS_SOURCE_DUMP_FILE" ] && return 0
-  # Word-split the space-separated key list into positional args.
-  # zsh's default (SH_WORD_SPLIT off) does NOT split unquoted $var on whitespace,
-  # so without explicit splitting the loop would iterate once with
-  # $_key="K1 K2 ..." and unset would fail with "invalid parameter name".
-  # In zsh, ${=var} forces splitting; in bash/dash, unquoted $var already splits.
-  if [ -n "${ZSH_VERSION:-}" ]; then
-    eval 'set -- ${=ENVS_SOURCE_INJECTED_KEYS}'
-  else
-    set -- $ENVS_SOURCE_INJECTED_KEYS
-  fi
-  for _key in "$@"; do
-    [ -z "$_key" ] && continue
-    # Snapshot is `env` output (KEY=VALUE per line), so a simple anchored
-    # match is enough. Assign with `export "KEY=VALUE"` directly instead of
-    # `eval`ing the line to avoid running shell metacharacters in values.
-    _dumpline=$(grep "^${_key}=" "$ENVS_SOURCE_DUMP_FILE" 2>/dev/null | head -1)
-    if [ -z "$_dumpline" ]; then
-      unset "$_key"
+  _restored=$(awk -F= -v keys="$ENVS_SOURCE_INJECTED_KEYS" '
+    BEGIN {
+      n = split(keys, ks, " ")
+      for (i = 1; i <= n; i++) {
+        if (ks[i] != "") want[ks[i]] = 1
+      }
+    }
+    {
+      k = $1
+      if (k in want && !(k in seen)) {
+        seen[k] = 1
+        # Strip "KEY=" prefix to recover the original value (which may itself contain `=`).
+        v = $0
+        sub(/^[^=]*=/, "", v)
+        printf "%s\t1\t%s\n", k, v
+      }
+    }
+    END {
+      for (i = 1; i <= n; i++) {
+        k = ks[i]
+        if (k != "" && !(k in seen) && !(k in printed)) {
+          printed[k] = 1
+          printf "%s\t0\n", k
+        }
+      }
+    }
+  ' "$ENVS_SOURCE_DUMP_FILE" 2>/dev/null)
+  [ -z "$_restored" ] && return 0
+  # Iterate awk output line-by-line. Use a here-doc fed `while read` so that
+  # word-splitting semantics are identical in zsh / bash / dash (no reliance on
+  # unquoted-$var splitting, which zsh disables by default). The literal tab
+  # inside the IFS string keeps the field split portable (no $'\t').
+  while IFS='	' read -r _k _flag _v; do
+    [ -z "$_k" ] && continue
+    if [ "$_flag" = "1" ]; then
+      export "${_k}=${_v}"
     else
-      _value="${_dumpline#*=}"
-      export "${_key}=${_value}"
+      unset "$_k"
     fi
-  done
+  done <<EOF
+$_restored
+EOF
 }
 
 # Re-evaluate routing for the current context and re-export matched keys.
 # Called every shell prompt while active.
 _envs_source_precmd() {
   [ -z "${ENVS_SOURCE_ACTIVE:-}" ] && return 0
+  # PWD cache — skip the whole eval (restore + envs match + .env read) while
+  # the user stays in the same directory. Trade-off: in-place changes such as
+  # `git checkout` to a branch where the routing differs will not be picked up
+  # until the user cd's away and back. Performance > exactness here.
+  if [ "${ENVS_SOURCE_LAST_PWD:-__unset__}" = "$PWD" ]; then
+    return 0
+  fi
   _envs_source_restore_keys
   ENVS_SOURCE_INJECTED_KEYS=""
 
   _matched=$(envs --source-match "${ENVS_SOURCE_NAME:-}" 2>/dev/null) || {
     ENVS_SOURCE_LAST_MATCHED=""
+    ENVS_SOURCE_LAST_PWD="$PWD"
     return 0
   }
   [ -z "$_matched" ] && {
     ENVS_SOURCE_LAST_MATCHED=""
+    ENVS_SOURCE_LAST_PWD="$PWD"
     return 0
   }
   [ ! -r "$_matched" ] && {
     ENVS_SOURCE_LAST_MATCHED=""
+    ENVS_SOURCE_LAST_PWD="$PWD"
     return 0
   }
 
@@ -184,6 +222,7 @@ _envs_source_precmd() {
     echo "envs-source: injected $_matched" >&2
     ENVS_SOURCE_LAST_MATCHED="$_matched"
   fi
+  ENVS_SOURCE_LAST_PWD="$PWD"
 }
 
 _envs_source_register_hook() {
