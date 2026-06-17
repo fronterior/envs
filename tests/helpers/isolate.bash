@@ -49,10 +49,13 @@ KEY_D=prodD
 EOF
 
   # Routing config — use <current_dir:...> so git presence is irrelevant.
+  # `current_dir` now globs against the full cwd path; the `*/foo` suffix form
+  # pins the match to the last segment so `sampleapp-dev` does not also fire
+  # inside `sampleapp-dev2`.
   cat > "$ENVS_CONFIG_DIR/config" <<EOF
-<current_dir:sampleapp-dev>dev:$ENVS_CONFIG_DIR/.env.dev
-<current_dir:sampleapp-dev2>dev:$ENVS_CONFIG_DIR/.env.dev2
-<current_dir:sampleapp-prod>prod:$ENVS_CONFIG_DIR/.env.prod
+<current_dir:*/sampleapp-dev>dev:$ENVS_CONFIG_DIR/.env.dev
+<current_dir:*/sampleapp-dev2>dev:$ENVS_CONFIG_DIR/.env.dev2
+<current_dir:*/sampleapp-prod>prod:$ENVS_CONFIG_DIR/.env.prod
 EOF
 
   # Stage a private bin dir on PATH with the real envs binary + a mock envs-dev

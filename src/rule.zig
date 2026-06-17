@@ -142,6 +142,13 @@ pub const ConditionResult = enum {
 pub fn evalConditions(rule: Rule, ctx: context.Context) ConditionResult {
     for (rule.conds) |c| {
         const k = c.key orelse return .unknown_key;
+        if (k == .current_dir) {
+            // Path-aware glob matching against cwd absolute path.
+            // Empty path (shouldn't happen in practice) never matches.
+            if (ctx.current_path.len == 0) return .not_matched;
+            if (!matchCurrentDir(ctx.current_path, c.value)) return .not_matched;
+            continue;
+        }
         const actual = ctxValue(ctx, k);
         // Empty context value never matches anything.
         if (actual.len == 0) return .not_matched;
@@ -158,6 +165,52 @@ fn ctxValue(ctx: context.Context, key: Key) []const u8 {
         .current_dir => ctx.current_dir,
         .name => "", // sentinel — only used via interpolation, not eval
     };
+}
+
+/// Match a `current_dir` glob pattern against `path` (cwd absolute path).
+///
+/// Supported patterns (per spec):
+///   - `foo`            → substring: path contains "foo"
+///   - `*/foo`          → suffix:    path ends with "/foo"
+///   - `*/foo/`         → suffix:    path ends with "/foo" or "/foo/"
+///   - `*/foo/*`        → contains:  path contains "/foo/" (foo is a segment, with more after)
+///   - anything else    → fall back to literal substring of the pattern
+///
+/// Hot path: zero alloc, only std.mem.{eql,endsWith,indexOf,startsWith}.
+pub fn matchCurrentDir(path: []const u8, pattern: []const u8) bool {
+    if (pattern.len == 0) return false;
+
+    // `*/foo/*` → contains "/foo/"
+    if (pattern.len >= 4 and
+        std.mem.startsWith(u8, pattern, "*/") and
+        std.mem.endsWith(u8, pattern, "/*"))
+    {
+        const inner = pattern[1 .. pattern.len - 1]; // "/foo/"
+        if (inner.len < 2) return false; // need at least "//"
+        // No further '*' allowed in the middle for this exact form.
+        if (std.mem.indexOfScalar(u8, inner, '*') != null) {
+            return std.mem.indexOf(u8, path, pattern) != null;
+        }
+        return std.mem.indexOf(u8, path, inner) != null;
+    }
+
+    // `*/foo` or `*/foo/` → suffix
+    if (pattern.len >= 2 and std.mem.startsWith(u8, pattern, "*/")) {
+        const tail = pattern[1..]; // "/foo" or "/foo/"
+        if (std.mem.indexOfScalar(u8, tail, '*') != null) {
+            return std.mem.indexOf(u8, path, pattern) != null;
+        }
+        if (std.mem.endsWith(u8, tail, "/")) {
+            // "/foo/" — accept either "/foo" or "/foo/" tail
+            const stripped = tail[0 .. tail.len - 1];
+            return std.mem.endsWith(u8, path, tail) or
+                std.mem.endsWith(u8, path, stripped);
+        }
+        return std.mem.endsWith(u8, path, tail);
+    }
+
+    // No leading `*/`: literal substring.
+    return std.mem.indexOf(u8, path, pattern) != null;
 }
 
 /// What context values the parsed rules use (drives lazy git read).
@@ -178,7 +231,8 @@ pub fn analyzeNeeded(rules: []const Rule) NeededReport {
                 .repo => report.needed.repo = true,
                 .org => report.needed.org = true,
                 .branch => report.needed.branch = true,
-                .current_dir => report.needed.current_dir = true,
+                // current_dir as a condition matches against the full cwd path.
+                .current_dir => report.needed.current_path = true,
                 .name => {},
             }
         }

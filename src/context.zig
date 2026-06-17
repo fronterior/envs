@@ -17,14 +17,20 @@ pub const Context = struct {
     repo: []const u8 = "",
     org: []const u8 = "",
     branch: []const u8 = "",
+    /// Basename of cwd. Used for `<current_dir>` interpolation.
     current_dir: []const u8 = "",
+    /// Absolute path of cwd. Used for `<current_dir:...>` glob matching.
+    current_path: []const u8 = "",
 };
 
 pub const Needed = struct {
     repo: bool = false,
     org: bool = false,
     branch: bool = false,
+    /// Basename of cwd (interpolation).
     current_dir: bool = false,
+    /// Absolute path of cwd (condition matching).
+    current_path: bool = false,
 };
 
 /// Build the context, performing only the I/O required by `needed`.
@@ -36,6 +42,9 @@ pub fn build(arena: std.mem.Allocator, io: Io, cwd: []const u8, needed: Needed) 
 
     if (needed.current_dir) {
         ctx.current_dir = try arena.dupe(u8, std.fs.path.basename(cwd));
+    }
+    if (needed.current_path) {
+        ctx.current_path = try arena.dupe(u8, cwd);
     }
 
     if (!needed.repo and !needed.org and !needed.branch) {

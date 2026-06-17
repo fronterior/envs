@@ -273,6 +273,100 @@ test "evalConditions: empty context value never matches" {
     try std.testing.expectEqual(rule_mod.ConditionResult.not_matched, rule_mod.evalConditions(r.rule.?, ctx));
 }
 
+test "evalConditions: current_dir bare substring (legacy compat)" {
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const r = try rule_mod.parseLine(a, "<current_dir:myapp>dev:.env");
+    const ctx: context.Context = .{ .current_path = "/Users/me/code/myapp" };
+    try std.testing.expectEqual(rule_mod.ConditionResult.matched, rule_mod.evalConditions(r.rule.?, ctx));
+}
+
+test "evalConditions: current_dir bare substring matches anywhere (intentional)" {
+    // Bare "foo" is a substring match — this is the looser legacy form.
+    // Tighter match needs `*/foo` (suffix) or `*/foo/*` (segment).
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const r = try rule_mod.parseLine(a, "<current_dir:foo>dev:.env");
+    const ctx: context.Context = .{ .current_path = "/x/foobar/y" };
+    try std.testing.expectEqual(rule_mod.ConditionResult.matched, rule_mod.evalConditions(r.rule.?, ctx));
+}
+
+test "evalConditions: current_dir suffix `*/foo` matches last segment only" {
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const r = try rule_mod.parseLine(a, "<current_dir:*/foo>dev:.env");
+    const ctx_hit: context.Context = .{ .current_path = "/a/b/foo" };
+    const ctx_miss: context.Context = .{ .current_path = "/a/foo/bar" };
+    const ctx_partial: context.Context = .{ .current_path = "/a/foobar" };
+    try std.testing.expectEqual(rule_mod.ConditionResult.matched, rule_mod.evalConditions(r.rule.?, ctx_hit));
+    try std.testing.expectEqual(rule_mod.ConditionResult.not_matched, rule_mod.evalConditions(r.rule.?, ctx_miss));
+    try std.testing.expectEqual(rule_mod.ConditionResult.not_matched, rule_mod.evalConditions(r.rule.?, ctx_partial));
+}
+
+test "evalConditions: current_dir segment `*/foo/*` matches inner segment" {
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    const r = try rule_mod.parseLine(a, "<current_dir:*/foo/*>dev:.env");
+    const ctx_hit: context.Context = .{ .current_path = "/a/foo/bar" };
+    const ctx_miss_tail: context.Context = .{ .current_path = "/a/b/foo" };
+    const ctx_miss_partial: context.Context = .{ .current_path = "/a/foobar/x" };
+    try std.testing.expectEqual(rule_mod.ConditionResult.matched, rule_mod.evalConditions(r.rule.?, ctx_hit));
+    try std.testing.expectEqual(rule_mod.ConditionResult.not_matched, rule_mod.evalConditions(r.rule.?, ctx_miss_tail));
+    try std.testing.expectEqual(rule_mod.ConditionResult.not_matched, rule_mod.evalConditions(r.rule.?, ctx_miss_partial));
+}
+
+test "matchCurrentDir: bare substring" {
+    try std.testing.expect(rule_mod.matchCurrentDir("/a/foo/b", "foo"));
+    try std.testing.expect(rule_mod.matchCurrentDir("/a/foobar/b", "foo"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/a/bar", "foo"));
+}
+
+test "matchCurrentDir: `*/foo` suffix" {
+    try std.testing.expect(rule_mod.matchCurrentDir("/x/foo", "*/foo"));
+    try std.testing.expect(rule_mod.matchCurrentDir("/foo", "*/foo"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foo/y", "*/foo"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foobar", "*/foo"));
+}
+
+test "matchCurrentDir: `*/foo/` accepts trailing slash" {
+    try std.testing.expect(rule_mod.matchCurrentDir("/x/foo", "*/foo/"));
+    try std.testing.expect(rule_mod.matchCurrentDir("/x/foo/", "*/foo/"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foo/y", "*/foo/"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foobar", "*/foo/"));
+}
+
+test "matchCurrentDir: `*/foo/*` segment" {
+    try std.testing.expect(rule_mod.matchCurrentDir("/x/foo/y", "*/foo/*"));
+    try std.testing.expect(rule_mod.matchCurrentDir("/foo/y", "*/foo/*"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foo", "*/foo/*"));
+    try std.testing.expect(!rule_mod.matchCurrentDir("/x/foobar/y", "*/foo/*"));
+}
+
+test "matchCurrentDir: disambiguates sampleapp-dev vs sampleapp-dev2" {
+    // The very scenario that motivated the spec change. With `*/sampleapp-dev`
+    // the pattern only matches when sampleapp-dev is the last path segment.
+    try std.testing.expect(rule_mod.matchCurrentDir(
+        "/Users/me/worktrees/sampleapp-dev",
+        "*/sampleapp-dev",
+    ));
+    try std.testing.expect(!rule_mod.matchCurrentDir(
+        "/Users/me/worktrees/sampleapp-dev2",
+        "*/sampleapp-dev",
+    ));
+}
+
 test "evalConditions: unknown key" {
     const arena_a = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(arena_a);
@@ -286,7 +380,7 @@ test "evalConditions: unknown key" {
 
 // ----- analyzeNeeded -----
 
-test "analyzeNeeded: only current_dir used" {
+test "analyzeNeeded: current_dir condition needs current_path (not basename)" {
     const arena_a = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(arena_a);
     defer arena_state.deinit();
@@ -296,10 +390,25 @@ test "analyzeNeeded: only current_dir used" {
     const p = try rule_mod.parseLine(a, "<current_dir:myapp>dev:.env");
     try rules.append(a, p.rule.?);
     const report = rule_mod.analyzeNeeded(rules.items);
-    try std.testing.expect(report.needed.current_dir);
+    try std.testing.expect(report.needed.current_path);
+    try std.testing.expect(!report.needed.current_dir);
     try std.testing.expect(!report.needed.repo);
     try std.testing.expect(!report.needed.org);
     try std.testing.expect(!report.needed.branch);
+}
+
+test "analyzeNeeded: current_dir interp pulls basename" {
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    var rules: std.ArrayList(rule_mod.Rule) = .empty;
+    const p = try rule_mod.parseLine(a, "dev:./<current_dir>/.env");
+    try rules.append(a, p.rule.?);
+    const report = rule_mod.analyzeNeeded(rules.items);
+    try std.testing.expect(report.needed.current_dir);
+    try std.testing.expect(!report.needed.current_path);
 }
 
 test "analyzeNeeded: path interp pulls repo" {
