@@ -213,14 +213,42 @@ pub fn matchCurrentDir(path: []const u8, pattern: []const u8) bool {
     return std.mem.indexOf(u8, path, pattern) != null;
 }
 
+/// True if a `current_dir` condition value uses `*` in a position the matcher
+/// does not interpret. matchCurrentDir only honours `*` in `*/foo`, `*/foo/`,
+/// and `*/foo/*`; any other `*` silently falls back to literal substring, which
+/// never matches a real path (paths don't contain `*`). Bare patterns (no `*`)
+/// are the intended substring form and are supported.
+pub fn isUnsupportedCurrentDirPattern(pattern: []const u8) bool {
+    if (std.mem.indexOfScalar(u8, pattern, '*') == null) return false;
+
+    // `*/foo/*` (contains): leading "*/", trailing "/*", no extra '*' between.
+    if (pattern.len >= 4 and
+        std.mem.startsWith(u8, pattern, "*/") and
+        std.mem.endsWith(u8, pattern, "/*"))
+    {
+        const inner = pattern[1 .. pattern.len - 1];
+        return std.mem.indexOfScalar(u8, inner, '*') != null;
+    }
+    // `*/foo` or `*/foo/` (suffix): leading "*/", no extra '*' in the tail.
+    if (std.mem.startsWith(u8, pattern, "*/")) {
+        const tail = pattern[1..];
+        return std.mem.indexOfScalar(u8, tail, '*') != null;
+    }
+    return true;
+}
+
 /// What context values the parsed rules use (drives lazy git read).
 pub const NeededReport = struct {
     needed: context.Needed = .{},
     has_unknown_cond_key: bool = false,
+    /// `current_dir` condition values using unsupported `*` patterns.
+    /// Collected at parse time so callers can warn (normal mode only).
+    unsupported_current_dir: []const []const u8 = &.{},
 };
 
-pub fn analyzeNeeded(rules: []const Rule) NeededReport {
+pub fn analyzeNeeded(arena: std.mem.Allocator, rules: []const Rule) !NeededReport {
     var report: NeededReport = .{};
+    var unsupported: std.ArrayList([]const u8) = .empty;
     for (rules) |rule| {
         for (rule.conds) |c| {
             const k = c.key orelse {
@@ -232,13 +260,19 @@ pub fn analyzeNeeded(rules: []const Rule) NeededReport {
                 .org => report.needed.org = true,
                 .branch => report.needed.branch = true,
                 // current_dir as a condition matches against the full cwd path.
-                .current_dir => report.needed.current_path = true,
+                .current_dir => {
+                    report.needed.current_path = true;
+                    if (isUnsupportedCurrentDirPattern(c.value)) {
+                        try unsupported.append(arena, c.value);
+                    }
+                },
                 .name => {},
             }
         }
         // Path interpolation may also reference context vars.
         analyzePath(rule.path_template, &report);
     }
+    report.unsupported_current_dir = try unsupported.toOwnedSlice(arena);
     return report;
 }
 

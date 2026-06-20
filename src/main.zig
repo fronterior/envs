@@ -116,7 +116,19 @@ fn run(
     }
 
     // Lazy git: build context only with what rules reference.
-    const needed = rule_mod.analyzeNeeded(rules.items).needed;
+    const report = try rule_mod.analyzeNeeded(arena, rules.items);
+    const needed = report.needed;
+
+    if (parsed.mode == .normal) {
+        for (report.unsupported_current_dir) |p| {
+            const msg = try std.fmt.allocPrint(
+                arena,
+                "unsupported current_dir pattern: {s} (only foo, */foo, */foo/, */foo/* supported)",
+                .{p},
+            );
+            emitError(arena, io, msg);
+        }
+    }
 
     var cwd_buf: [std.Io.Dir.max_path_bytes]u8 = undefined;
     const cwd_len = try std.process.currentPath(io, &cwd_buf);

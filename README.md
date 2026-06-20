@@ -140,7 +140,7 @@ If you're not in a git repo, `repo`/`org`/`branch` are empty, so any rule using 
 | `*/foo`        | cwd path **ends with** `/foo` — i.e. `foo` is the last segment (exact).                  |
 | `*/foo/*`      | cwd path **contains** `/foo/` — i.e. `foo` is a segment somewhere with more path after.  |
 
-The wildcard `*` here is shell-glob-like and may cross slashes; only the three positions above are defined. Any other use of `*` (e.g. `*foo*bar*`) is treated as a literal substring search for the whole pattern.
+The wildcard `*` here is shell-glob-like and may cross slashes; only the three positions above are defined. Any other use of `*` (e.g. `*foo*bar*`) is treated as a literal substring search for the whole pattern. Such unsupported `*` patterns never match a real path, so normal mode prints a stderr warning to flag them (source mode stays silent).
 
 Compatibility: prior to this change `current_dir` was an exact match against `basename(cwd)`. The new behaviour is intentionally looser by default — bare `foo` now also matches `myfoo`, `foobar`, `foo-extra` etc. anywhere in the path. If you need the old "last segment is exactly foo" semantics, write `<current_dir:*/foo>`.
 

@@ -367,6 +367,24 @@ test "matchCurrentDir: disambiguates sampleapp-dev vs sampleapp-dev2" {
     ));
 }
 
+test "isUnsupportedCurrentDirPattern: supported forms" {
+    try std.testing.expect(!rule_mod.isUnsupportedCurrentDirPattern("foo"));
+    try std.testing.expect(!rule_mod.isUnsupportedCurrentDirPattern("*/foo"));
+    try std.testing.expect(!rule_mod.isUnsupportedCurrentDirPattern("*/foo/"));
+    try std.testing.expect(!rule_mod.isUnsupportedCurrentDirPattern("*/foo/*"));
+    try std.testing.expect(!rule_mod.isUnsupportedCurrentDirPattern("*/sampleapp-dev"));
+}
+
+test "isUnsupportedCurrentDirPattern: unsupported forms" {
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("*/a/*/b/*"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("*/a*b"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("a/*/b"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("**/x"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("foo*"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("*foo"));
+    try std.testing.expect(rule_mod.isUnsupportedCurrentDirPattern("a*b"));
+}
+
 test "evalConditions: unknown key" {
     const arena_a = std.testing.allocator;
     var arena_state = std.heap.ArenaAllocator.init(arena_a);
@@ -389,7 +407,7 @@ test "analyzeNeeded: current_dir condition needs current_path (not basename)" {
     var rules: std.ArrayList(rule_mod.Rule) = .empty;
     const p = try rule_mod.parseLine(a, "<current_dir:myapp>dev:.env");
     try rules.append(a, p.rule.?);
-    const report = rule_mod.analyzeNeeded(rules.items);
+    const report = try rule_mod.analyzeNeeded(a, rules.items);
     try std.testing.expect(report.needed.current_path);
     try std.testing.expect(!report.needed.current_dir);
     try std.testing.expect(!report.needed.repo);
@@ -406,7 +424,7 @@ test "analyzeNeeded: current_dir interp pulls basename" {
     var rules: std.ArrayList(rule_mod.Rule) = .empty;
     const p = try rule_mod.parseLine(a, "dev:./<current_dir>/.env");
     try rules.append(a, p.rule.?);
-    const report = rule_mod.analyzeNeeded(rules.items);
+    const report = try rule_mod.analyzeNeeded(a, rules.items);
     try std.testing.expect(report.needed.current_dir);
     try std.testing.expect(!report.needed.current_path);
 }
@@ -420,8 +438,26 @@ test "analyzeNeeded: path interp pulls repo" {
     var rules: std.ArrayList(rule_mod.Rule) = .empty;
     const p = try rule_mod.parseLine(a, "dev:~/envs/<repo>/.env");
     try rules.append(a, p.rule.?);
-    const report = rule_mod.analyzeNeeded(rules.items);
+    const report = try rule_mod.analyzeNeeded(a, rules.items);
     try std.testing.expect(report.needed.repo);
+}
+
+test "analyzeNeeded: collects unsupported current_dir patterns" {
+    const arena_a = std.testing.allocator;
+    var arena_state = std.heap.ArenaAllocator.init(arena_a);
+    defer arena_state.deinit();
+    const a = arena_state.allocator();
+
+    var rules: std.ArrayList(rule_mod.Rule) = .empty;
+    try rules.append(a, (try rule_mod.parseLine(a, "<current_dir:a/*/b>dev:.env")).rule.?);
+    try rules.append(a, (try rule_mod.parseLine(a, "<current_dir:*/foo>dev:.env")).rule.?); // supported
+    try rules.append(a, (try rule_mod.parseLine(a, "<current_dir:foo*>dev:.env")).rule.?);
+    try rules.append(a, (try rule_mod.parseLine(a, "<current_dir:bare>dev:.env")).rule.?); // supported
+
+    const report = try rule_mod.analyzeNeeded(a, rules.items);
+    try std.testing.expectEqual(@as(usize, 2), report.unsupported_current_dir.len);
+    try std.testing.expectEqualStrings("a/*/b", report.unsupported_current_dir[0]);
+    try std.testing.expectEqualStrings("foo*", report.unsupported_current_dir[1]);
 }
 
 // ----- interpolation -----
