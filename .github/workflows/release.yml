@@ -183,11 +183,17 @@ jobs:
           draft: false
           prerelease: false
           fail_on_unmatched_files: true
+          # install.sh / uninstall.sh uploaded as standalone assets so the
+          # README's `releases/latest/download/install.sh` installer is pinned
+          # to this tag — same version as the tarball, and only ships after the
+          # install_smoke gate passes (needs: install_smoke above).
           files: |
             dist/envs-aarch64-macos.tar.xz
             dist/envs-x86_64-macos.tar.xz
             dist/envs-aarch64-linux.tar.xz
             dist/envs-x86_64-linux.tar.xz
+            install.sh
+            uninstall.sh
 
   # Branch artifact: every non-tag branch push gets a rolling `branch-<sanitized>` release.
   # `install.sh --branch <name>` reads from these via the GitHub Release API.

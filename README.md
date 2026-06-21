@@ -23,8 +23,13 @@ Modern dev loops involve multiple worktrees of the same repo (for parallel featu
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/install.sh | sh
+curl -fsSL https://github.com/fronterior/envs/releases/latest/download/install.sh | sh
 ```
+
+This installer is the one shipped with the latest release, so the script and
+the binary it installs are always the same version (and it only ships after the
+release pipeline's install smoke test passes). To install straight from `main`
+instead, use `https://raw.githubusercontent.com/fronterior/envs/main/install.sh`.
 
 If `~/.local/bin` is not in your `PATH`, the installer will detect your shell and offer to add the export line to `~/.zshrc` / `~/.bashrc` / `~/.profile` (asks for confirmation).
 
@@ -48,7 +53,7 @@ So `feat/foo-bar` resolves to tag `branch-feat-foo-bar`, `main` resolves to `bra
 ## Uninstall
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/fronterior/envs/main/uninstall.sh | sh
+curl -fsSL https://github.com/fronterior/envs/releases/latest/download/uninstall.sh | sh
 ```
 
 Removes `~/.local/bin/envs` and the clone at `~/.local/share/envs`. Your routing config at `~/.config/envs/` is **preserved** — `rm -rf ~/.config/envs` to delete it.
