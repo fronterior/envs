@@ -14,7 +14,7 @@
 load helpers/routing
 
 setup() {
-  routing_require_bin || skip "zig-out/bin/envs not built; run 'zig build' first"
+  routing_require_bin
 }
 
 teardown() {
@@ -188,4 +188,13 @@ KEY_C=c" "<current_dir:frontends>test:.env" "
   assert_var other test TEST ""
   run bash -c "cd '$HOME/other' && '$ENVS_BIN' test sh -c 'printf RAN' 2>/dev/null"
   [ "$output" = "RAN" ]
+}
+
+@test "unknown condition key (typo) never matches" {
+  routing_case "TEST=true" "<rpeo:myapp>test:.env" "
+    - ~
+      - Dev
+        - frontends
+  "
+  assert_var Dev/frontends test TEST ""
 }

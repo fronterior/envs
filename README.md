@@ -128,7 +128,7 @@ The same keyword pool is used both as conditions (`<keyword:value>` at the start
 | Key           | Source                                                    |
 |---------------|-----------------------------------------------------------|
 | `repo`        | `basename` of `git config --get remote.origin.url`, `.git` stripped |
-| `org`         | The org/user segment of that URL (e.g. `ridi` in `git@github.com:ridi/myapp.git`) |
+| `org`         | The org/user segment of that URL (e.g. `octocat` in `git@github.com:octocat/myapp.git`) |
 | `branch`      | `git symbolic-ref --short HEAD`                            |
 | `current_dir` | As a **condition** (`<current_dir:...>`): matched against the **absolute cwd path** with three glob forms (see below). As **path interpolation** (`<current_dir>`): `basename "$PWD"` — unchanged. |
 | `name`        | The env_name (the CLI first argument). Path-interpolation only — not usable as a condition. |
