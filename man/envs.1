@@ -1,0 +1,106 @@
+.TH ENVS 1 "" "envs" "User Commands"
+.SH NAME
+envs \- context-aware local environment router for the worktree era
+.SH SYNOPSIS
+\fBenvs\fR \fIenv_name\fR \fIcommand\fR [\fIargs\fR ...]
+.br
+\fBenvs-source-activate\fR [\fIname\fR]
+.SH DESCRIPTION
+\fBenvs\fR picks the right \fI.env\fR file based on the current context
+(which repo, which branch, which directory), exports its variables, and
+runs the given command with them injected. Env files live in one global
+place (\fI~/.config/envs/\fR) and a single routing table selects the file
+for the current context, so no \fB.env\fR ever has to live inside a
+worktree.
+.PP
+There is no per-project setup: a new worktree or a temporary agent
+directory is already routed, and secrets never risk being committed.
+.SH USAGE
+.TP
+\fBenvs\fR \fIenv_name\fR \fIcommand\fR ...
+Resolve the routing rule for \fIenv_name\fR in the current directory,
+export the matched \fI.env\fR file, and run \fIcommand\fR with it.
+.SH CONFIG SYNTAX
+The routing table is \fI~/.config/envs/config\fR. Each rule is one line:
+.PP
+.RS 4
+.nf
+<cond1,cond2,...>env_name:path
+.fi
+.RE
+.IP \(bu 4
+\fB<...>\fR \(em zero or more comma-separated conditions; all must match (AND).
+.IP \(bu 4
+\fBenv_name\fR \(em the first CLI argument to \fBenvs\fR.
+.IP \(bu 4
+\fBpath\fR \(em env file location; may contain \fB<keyword>\fR placeholders
+that interpolate the runtime context.
+.IP \(bu 4
+First match wins. Lines starting with \fB#\fR and blank lines are ignored.
+.SH CONTEXT KEYWORDS
+Usable both as conditions (\fB<key:value>\fR) and as path interpolation
+(\fB<key>\fR).
+.TP
+.B repo
+basename of the git remote origin URL, with \fB.git\fR stripped.
+.TP
+.B org
+the org/user segment of that URL.
+.TP
+.B branch
+the current git branch.
+.TP
+.B current_dir
+as a condition, matched against the absolute cwd path with three glob
+forms: \fBfoo\fR (substring), \fB*/foo\fR (last segment), and \fB*/foo/*\fR
+(interior segment). As path interpolation, the basename of the cwd.
+.TP
+.B name
+the env_name CLI argument; usable in path interpolation only.
+.PP
+Outside a git repo, \fBrepo\fR, \fBorg\fR and \fBbranch\fR are empty, so
+rules using them never match. \fBcurrent_dir\fR always works.
+.SH "ENVS-SOURCE (VIRTUALENV STYLE)"
+For env vars that persist across multiple commands in one shell, source
+\fIenvs-source.sh\fR (or \fIenvs-source.fish\fR) and use:
+.TP
+\fBenvs-source-activate\fR [\fIname\fR]
+Activate source mode; a precmd hook re-evaluates routing every prompt and
+swaps the exported keys as you \fBcd\fR.
+.TP
+.B envs-source-deactivate
+Deactivate and restore the original value of every injected key.
+.TP
+.B envs-source-status
+Print current state \(em \fBinactive\fR, or \fBactive\fR with name, matched
+file, and injected keys.
+.PP
+A dev pair (\fIenvs-dev-source.sh\fR, \fBenvs-dev-source-*\fR) uses a
+separate variable namespace so both can coexist.
+.SH EXAMPLES
+.RS 4
+.nf
+# Route "development" inside the myapp repo.
+echo '<repo:myapp>development:./myapp/.env.development' >> ~/.config/envs/config
+cd ~/code/myapp
+envs development pnpm dev
+.fi
+.RE
+.SH FILES
+.TP
+.I ~/.config/envs/config
+The routing table.
+.TP
+.I ~/.config/envs/<project>/.env.<name>
+Your env files (secrets).
+.TP
+.I ~/.local/bin/envs
+The installed binary.
+.TP
+.I ~/.local/share/envs/
+Wrapper scripts, example config, and the full README.
+.SH "SEE ALSO"
+Full documentation: \fI~/.local/share/envs/README.md\fR and
+<https://github.com/fronterior/envs>.
+.SH LICENSE
+MIT.

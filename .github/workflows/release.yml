@@ -67,6 +67,7 @@ jobs:
           cp envs-source.fish                 "$stage/envs-source.fish"
           cp envs-dev-source.sh               "$stage/envs-dev-source.sh"
           cp README.md                        "$stage/README.md"
+          cp man/envs.1                       "$stage/envs.1"
           cp example/config                   "$stage/example/config"
 
       - name: Pack tar.xz

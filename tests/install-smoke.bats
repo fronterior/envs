@@ -78,6 +78,7 @@ _build_release_tarball() {
   cp "$REPO_ROOT/envs-source.fish"    "$_stage/envs-source.fish"
   cp "$REPO_ROOT/envs-dev-source.sh"  "$_stage/envs-dev-source.sh"
   cp "$REPO_ROOT/README.md"           "$_stage/README.md"
+  cp "$REPO_ROOT/man/envs.1"          "$_stage/envs.1"
   cp "$REPO_ROOT/example/config"      "$_stage/example/config"
 
   SMOKE_TARBALL="$SMOKE_TARBALL_DIR/envs-test-triple.tar.xz"
@@ -116,6 +117,10 @@ _build_release_tarball() {
   # README + example/config also staged.
   [ -f "$SMOKE_HOME/.local/share/envs/README.md" ]
   [ -f "$SMOKE_HOME/.local/share/envs/example/config" ]
+
+  # Man page installed so `man envs` works.
+  [ -f "$SMOKE_HOME/.local/share/man/man1/envs.1" ] \
+    || { echo "missing man page"; ls -la "$SMOKE_HOME/.local/share/man/man1/" 2>&1; return 1; }
 }
 
 @test "release mode: staged envs-source.sh registers shell functions when sourced" {

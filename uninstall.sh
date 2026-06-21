@@ -12,6 +12,7 @@
 #   $_target_dir/envs.bak.*     — backup files from prior installs
 #   $_target_dir/envs-dev.bak.* — backup files from prior installs
 #   $_lib_dir/envs              — installed zig binary (release mode)
+#   $_man_dir/envs.1            — installed man page (release/dev mode)
 #   $_envs_home                 — release stage dir (source files + example/)
 #   $_zig_dir                   — managed zig cache (~/.local/share/envs/zig)
 #   $HOME/.config/envs/         — user secrets (preserved unless --purge-config)
@@ -20,6 +21,7 @@
 #   ENVS_HOME         default: ~/.local/share/envs
 #   ENVS_LIB_DIR      default: ~/.local/lib/envs
 #   ENVS_TARGET_DIR   default: ~/.local/bin
+#   ENVS_MAN_DIR      default: ~/.local/share/man/man1
 #   ENVS_ZIG_DIR      default: ~/.local/share/envs/zig
 #
 # Flags:
@@ -33,6 +35,7 @@ set -eu
 _envs_home="${ENVS_HOME:-$HOME/.local/share/envs}"
 _lib_dir="${ENVS_LIB_DIR:-$HOME/.local/lib/envs}"
 _target_dir="${ENVS_TARGET_DIR:-$HOME/.local/bin}"
+_man_dir="${ENVS_MAN_DIR:-$HOME/.local/share/man/man1}"
 _zig_dir="${ENVS_ZIG_DIR:-$HOME/.local/share/envs/zig}"
 
 _keep_zig=0
@@ -237,6 +240,12 @@ fi
 if [ -d "$_lib_dir" ]; then
   rmdir "$_lib_dir" 2>/dev/null && echo "removed: $_lib_dir" || \
     echo "NOTE: $_lib_dir not empty — left alone"
+fi
+
+# 4b. installed man page at $_man_dir/envs.1
+if [ -e "$_man_dir/envs.1" ] || [ -L "$_man_dir/envs.1" ]; then
+  rm -f "$_man_dir/envs.1"
+  echo "removed: $_man_dir/envs.1"
 fi
 
 # 5. release-stage files at $_envs_home

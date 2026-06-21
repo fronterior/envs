@@ -45,6 +45,7 @@ _repo="${ENVS_REPO:-fronterior/envs}"
 _envs_home="${ENVS_HOME:-$HOME/.local/share/envs}"
 _lib_dir="${ENVS_LIB_DIR:-$HOME/.local/lib/envs}"
 _target_dir="${ENVS_TARGET_DIR:-$HOME/.local/bin}"
+_man_dir="${ENVS_MAN_DIR:-$HOME/.local/share/man/man1}"
 _zig_dir="${ENVS_ZIG_DIR:-$HOME/.local/share/envs/zig}"
 _zig_min_version="${ENVS_ZIG_VERSION:-0.16.0}"
 
@@ -347,6 +348,17 @@ _release_resolve_url() {
   echo "envs: asset       = $_release_dl_url"
 }
 
+# Install the man page (envs.1) to $_man_dir so `man envs` works. Source is the
+# repo's man/envs.1 (dev mode) or the extracted tarball root (release mode).
+_install_man() {
+  _man_src="$1"
+  if [ -f "$_man_src" ]; then
+    mkdir -p "$_man_dir"
+    cp "$_man_src" "$_man_dir/envs.1"
+    echo "envs: man page installed at $_man_dir/envs.1 (run: man envs)"
+  fi
+}
+
 _do_release_install() {
   _dl_tmp="$(mktemp -d -t envs-install.XXXXXX)"
   if [ -n "${ENVS_RELEASE_TARBALL:-}" ]; then
@@ -393,6 +405,7 @@ _do_release_install() {
   if [ -f "$_root_dir/README.md" ]; then
     cp "$_root_dir/README.md" "$_envs_home/README.md"
   fi
+  _install_man "$_root_dir/envs.1"
 
   # Future config seed + rc lines reference this stable dir.
   _proj_dir="$_envs_home"
@@ -408,6 +421,7 @@ if [ "$_mode" = "dev" ]; then
     _install_dev_link
   fi
   _proj_dir="$_self_dir"
+  _install_man "$_self_dir/man/envs.1"
 else
   _do_release_install
 fi
