@@ -169,6 +169,10 @@ fn ctxValue(ctx: context.Context, key: Key) []const u8 {
 
 /// Match a `current_dir` glob pattern against `path` (cwd absolute path).
 ///
+/// Matching is ASCII case-insensitive, so `dev/frontends` matches a cwd of
+/// `.../Dev/frontends`. Only the path↔pattern content compare ignores case; the
+/// structural markers (`*`, `/`) in the pattern are still matched exactly.
+///
 /// Supported patterns (per spec):
 ///   - `foo`            → substring: path contains "foo"
 ///   - `*/foo`          → suffix:    path ends with "/foo"
@@ -176,7 +180,8 @@ fn ctxValue(ctx: context.Context, key: Key) []const u8 {
 ///   - `*/foo/*`        → contains:  path contains "/foo/" (foo is a segment, with more after)
 ///   - anything else    → fall back to literal substring of the pattern
 ///
-/// Hot path: zero alloc, only std.mem.{eql,endsWith,indexOf,startsWith}.
+/// Hot path: zero alloc, only std.ascii.{indexOfIgnoreCase,endsWithIgnoreCase}
+/// plus exact std.mem startsWith/endsWith on the pattern markers.
 pub fn matchCurrentDir(path: []const u8, pattern: []const u8) bool {
     if (pattern.len == 0) return false;
 
@@ -189,28 +194,28 @@ pub fn matchCurrentDir(path: []const u8, pattern: []const u8) bool {
         if (inner.len < 2) return false; // need at least "//"
         // No further '*' allowed in the middle for this exact form.
         if (std.mem.indexOfScalar(u8, inner, '*') != null) {
-            return std.mem.indexOf(u8, path, pattern) != null;
+            return std.ascii.indexOfIgnoreCase(path, pattern) != null;
         }
-        return std.mem.indexOf(u8, path, inner) != null;
+        return std.ascii.indexOfIgnoreCase(path, inner) != null;
     }
 
     // `*/foo` or `*/foo/` → suffix
     if (pattern.len >= 2 and std.mem.startsWith(u8, pattern, "*/")) {
         const tail = pattern[1..]; // "/foo" or "/foo/"
         if (std.mem.indexOfScalar(u8, tail, '*') != null) {
-            return std.mem.indexOf(u8, path, pattern) != null;
+            return std.ascii.indexOfIgnoreCase(path, pattern) != null;
         }
         if (std.mem.endsWith(u8, tail, "/")) {
             // "/foo/" — accept either "/foo" or "/foo/" tail
             const stripped = tail[0 .. tail.len - 1];
-            return std.mem.endsWith(u8, path, tail) or
-                std.mem.endsWith(u8, path, stripped);
+            return std.ascii.endsWithIgnoreCase(path, tail) or
+                std.ascii.endsWithIgnoreCase(path, stripped);
         }
-        return std.mem.endsWith(u8, path, tail);
+        return std.ascii.endsWithIgnoreCase(path, tail);
     }
 
     // No leading `*/`: literal substring.
-    return std.mem.indexOf(u8, path, pattern) != null;
+    return std.ascii.indexOfIgnoreCase(path, pattern) != null;
 }
 
 /// True if a `current_dir` condition value uses `*` in a position the matcher
