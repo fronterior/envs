@@ -1,68 +1,191 @@
 #!/usr/bin/env bats
 # tests/envs-routing.bats — end-to-end routing for the `envs <name> <cmd>` binary.
 #
-# Proves the headline path the rest of the suite never exercises: match a rule ->
-# load its .env -> exec the command with those vars injected. Uses the REAL
-# compiled binary against REAL directories under a tmpdir.
+# Each test is a declarative scenario (see tests/helpers/routing.bash):
+#   * an .env, a routing config, and a directory tree are written under an
+#     isolated tmp HOME,
+#   * the REAL compiled binary is run from a real cwd,
+#   * the value it injected into the command is asserted.
 #
-# Focus: `<current_dir:foo>` with no '*' is a *substring* match against the
-# absolute cwd path, and matching is ASCII case-insensitive. The condition here
-# is a multi-segment substring `dev/frontends` (lowercase) — so:
-#   * `.../Dev/frontends` matches (substring present, case-insensitive)
-#   * `.../frontends`     does NOT (no `dev/frontends` substring)
-# The second dir is the negative case: the substring distinguishes the two,
-# which is what makes this a substring proof rather than a match-anything one.
-#
-# Isolation: config is injected via $ENVS_CONFIG_DIR (the binary reads
-# $ENVS_CONFIG_DIR/config — src/main.zig), so no user dotfiles are touched.
+# Covers the binary's headline path (match rule -> load .env -> exec command
+# with env injected) across every current_dir matching form, multi-condition
+# AND, env_name selection, first-match-wins, comments, and path interpolation.
+
+load helpers/routing
 
 setup() {
-  REPO_ROOT="$(cd "$BATS_TEST_DIRNAME/.." && pwd)"
-  ENVS_BIN="$REPO_ROOT/zig-out/bin/envs"
-  if [ ! -x "$ENVS_BIN" ]; then
-    skip "zig-out/bin/envs not built; run 'zig build' first"
-  fi
-  export ENVS_BIN
-
-  ROUTE_TMP="$(mktemp -d -t envs-routing.XXXXXX)"
-  export ROUTE_TMP
-  export HOME="$ROUTE_TMP"
-
-  _cfg="$ROUTE_TMP/config-dir"
-  mkdir -p "$_cfg"
-  export ENVS_CONFIG_DIR="$_cfg"
-
-  printf 'TEST=true\n' > "$ROUTE_TMP/shared.env"
-
-  # Real tree. `Dev/frontends` (capital D) is the matching path; bare `frontends`
-  # is the negative — it has no `dev/frontends` substring.
-  mkdir -p "$ROUTE_TMP/Dev/frontends" "$ROUTE_TMP/frontends"
-
-  # Lowercase, multi-segment substring. Exercises both the substring rule and
-  # case-insensitive matching at once.
-  printf '<current_dir:dev/frontends>test:%s\n' "$ROUTE_TMP/shared.env" > "$_cfg/config"
+  routing_require_bin || skip "zig-out/bin/envs not built; run 'zig build' first"
 }
 
 teardown() {
-  if [ -n "${ROUTE_TMP:-}" ] && [ -d "$ROUTE_TMP" ]; then
-    case "$ROUTE_TMP" in
-      /tmp/*|/var/folders/*|/private/var/folders/*) rm -rf "$ROUTE_TMP" ;;
-    esac
-  fi
+  routing_teardown
 }
 
-# Single quotes around the sh body: the parent (bats) shell must NOT expand
-# $TEST — the inner sh, spawned by envs with the injected env, expands it.
-@test "current_dir 'dev/frontends' matches '.../Dev/frontends' (substring + case-insensitive) -> injects TEST" {
-  cd "$ROUTE_TMP/Dev/frontends"
-  run "$ENVS_BIN" test sh -c 'printf "TESTVAL=[%s]" "$TEST"'
-  [ "$status" -eq 0 ] || { echo "exit=$status"; echo "$output"; return 1; }
-  [[ "$output" == *"TESTVAL=[true]"* ]] || { echo "expected TESTVAL=[true]:"; echo "$output"; return 1; }
+@test "current_dir bare 'frontends' is a substring match — matches anywhere in the path" {
+  routing_case "TEST=true" "<current_dir:frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+      - frontends
+      - work
+        - frontends-app
+      - other
+  "
+  assert_var Dev/frontends    test TEST true
+  assert_var frontends        test TEST true
+  assert_var work/frontends-app test TEST true
+  assert_var other            test TEST ""
 }
 
-@test "current_dir 'dev/frontends' does NOT match '.../frontends' (no substring) -> no injection, command still runs" {
-  cd "$ROUTE_TMP/frontends"
-  run "$ENVS_BIN" test sh -c 'printf "TESTVAL=[%s]" "$TEST"'
-  [ "$status" -eq 0 ] || { echo "exit=$status"; echo "$output"; return 1; }
-  [[ "$output" == *"TESTVAL=[]"* ]] || { echo "expected empty TESTVAL=[]:"; echo "$output"; return 1; }
+@test "current_dir 'Dev/frontends' multi-segment substring — distinguishes the two dirs" {
+  routing_case "TEST=true" "<current_dir:Dev/frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+      - frontends
+  "
+  assert_var Dev/frontends test TEST true
+  assert_var frontends     test TEST ""
+}
+
+@test "current_dir matching is ASCII case-insensitive ('dev/frontends' matches '.../Dev/frontends')" {
+  routing_case "TEST=true" "<current_dir:dev/frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+      - frontends
+  "
+  assert_var Dev/frontends test TEST true
+  assert_var frontends     test TEST ""
+}
+
+@test "current_dir case-insensitive on the bare form too ('FRONTENDS' matches 'frontends')" {
+  routing_case "TEST=true" "<current_dir:FRONTENDS>test:.env" "
+    - ~
+      - Dev
+        - frontends
+  "
+  assert_var Dev/frontends test TEST true
+}
+
+@test "current_dir '*/frontends' matches the last segment only" {
+  routing_case "TEST=true" "<current_dir:*/frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+          - sub
+      - frontends
+  "
+  assert_var Dev/frontends     test TEST true
+  assert_var frontends         test TEST true
+  assert_var Dev/frontends/sub test TEST ""
+}
+
+@test "current_dir '*/frontends/' accepts a trailing slash (last segment)" {
+  routing_case "TEST=true" "<current_dir:*/frontends/>test:.env" "
+    - ~
+      - Dev
+        - frontends
+          - sub
+  "
+  assert_var Dev/frontends     test TEST true
+  assert_var Dev/frontends/sub test TEST ""
+}
+
+@test "current_dir '*/frontends/*' matches an interior segment only" {
+  routing_case "TEST=true" "<current_dir:*/frontends/*>test:.env" "
+    - ~
+      - Dev
+        - frontends
+          - sub
+  "
+  assert_var Dev/frontends/sub test TEST true
+  assert_var Dev/frontends     test TEST ""
+}
+
+@test "two conditions are AND-ed (both current_dir substrings must be present)" {
+  routing_case "TEST=true" "<current_dir:Dev,current_dir:frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+        - backend
+      - x
+        - frontends
+  "
+  assert_var Dev/frontends test TEST true
+  assert_var Dev/backend   test TEST ""
+  assert_var x/frontends   test TEST ""
+}
+
+@test "first matching rule wins (order matters)" {
+  routing_case "" "<current_dir:frontends>test:.env.first
+<current_dir:Dev>test:.env.second" "
+    - ~
+      - Dev
+        - frontends
+        - backend
+  "
+  cfg_file .env.first  "TEST=first"
+  cfg_file .env.second "TEST=second"
+  assert_var Dev/frontends test TEST first
+  assert_var Dev/backend   test TEST second
+}
+
+@test "env_name selects the rule (dev vs prod vs unknown)" {
+  routing_case "" "<current_dir:frontends>dev:.env.dev
+<current_dir:frontends>prod:.env.prod" "
+    - ~
+      - Dev
+        - frontends
+  "
+  cfg_file .env.dev  "TEST=devval"
+  cfg_file .env.prod "TEST=prodval"
+  assert_var Dev/frontends dev   TEST devval
+  assert_var Dev/frontends prod  TEST prodval
+  assert_var Dev/frontends other TEST ""
+}
+
+@test "comment and blank lines in the config are ignored" {
+  routing_case "TEST=true" "# leading comment
+
+<current_dir:frontends>test:.env
+# trailing comment" "
+    - ~
+      - Dev
+        - frontends
+  "
+  assert_var Dev/frontends test TEST true
+}
+
+@test "path interpolation: <current_dir> resolves to the cwd basename" {
+  routing_case "" "test:./<current_dir>/.env" "
+    - ~
+      - Dev
+        - frontends
+  "
+  cfg_file frontends/.env "TEST=interp"
+  assert_var Dev/frontends test TEST interp
+}
+
+@test "multiple injected keys all reach the command" {
+  routing_case "KEY_A=a
+KEY_B=b
+KEY_C=c" "<current_dir:frontends>test:.env" "
+    - ~
+      - Dev
+        - frontends
+  "
+  assert_var Dev/frontends test KEY_A a
+  assert_var Dev/frontends test KEY_B b
+  assert_var Dev/frontends test KEY_C c
+}
+
+@test "no matching rule -> nothing injected, but the command still runs" {
+  routing_case "TEST=true" "<current_dir:frontends>test:.env" "
+    - ~
+      - other
+  "
+  assert_var other test TEST ""
+  run bash -c "cd '$HOME/other' && '$ENVS_BIN' test sh -c 'printf RAN' 2>/dev/null"
+  [ "$output" = "RAN" ]
 }
